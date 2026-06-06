@@ -111,6 +111,14 @@ p {
   font-size: 1.05rem;
 }
 
+.startAction:not(:disabled) {
+  background: #b9f2cc;
+}
+
+.stopAction:not(:disabled) {
+  background: #ffd1cc;
+}
+
 .transport .active {
   background: #d7f4ff;
 }

@@ -299,15 +299,8 @@ function App() {
     return promise;
   }
 
-  async function toggleLiveStream() {
-    if (liveRef.current) {
-      liveRef.current = false;
-      setLive(false);
-      socketRef.current?.send(JSON.stringify({ type: "magenta:stream:stop" }));
-      setStatus("Stopping live stream.");
-      return;
-    }
-
+  async function startLiveStream() {
+    if (liveRef.current) return;
     try {
       await ensureAudio();
       if (!midiConnected) {
@@ -324,6 +317,14 @@ function App() {
       setLive(false);
       setStatus("TouchMe MIDI was not opened. Check the board connection and browser MIDI permission.");
     }
+  }
+
+  function stopLiveStream() {
+    if (!liveRef.current) return;
+    liveRef.current = false;
+    setLive(false);
+    socketRef.current?.send(JSON.stringify({ type: "magenta:stream:stop" }));
+    setStatus("Stopping live stream.");
   }
 
   return (
@@ -350,9 +351,13 @@ function App() {
       </section>
 
       <section className="transport">
-        <button className={`primaryAction ${live ? "active" : ""}`} onClick={toggleLiveStream}>
-          {live ? <Square size={18} /> : audioReady ? <Check size={18} /> : <Play size={18} />}
-          {live ? "Stop Live Stream" : "Start Live Stream"}
+        <button className="primaryAction startAction" onClick={startLiveStream} disabled={live}>
+          {audioReady ? <Check size={18} /> : <Play size={18} />}
+          Start Live Stream
+        </button>
+        <button className="primaryAction stopAction" onClick={stopLiveStream} disabled={!live}>
+          <Square size={18} />
+          Stop Live Stream
         </button>
         <div className="sourcePicker">
           <Music2 size={18} />
