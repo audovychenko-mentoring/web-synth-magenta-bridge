@@ -36,8 +36,9 @@ function midiFrequency(note: number) {
   return 440 * 2 ** ((note - 69) / 12);
 }
 
-const PLANT_CHANGE_THRESHOLD = 0.0035;
-const PLANT_CHANGE_GAIN = 22;
+const PLANT_CHANGE_THRESHOLD = 0.0015;
+const PLANT_CHANGE_GAIN = 46;
+const PLANT_OUTPUT_BOOST = 1.65;
 
 function errorMessage(error: unknown) {
   if (error instanceof Error) return `${error.name}: ${error.message}`;
@@ -436,8 +437,9 @@ function App() {
     const context = audioRef.current;
     if (!context || !masterRef.current) return;
     const [, data1 = 0, data2 = 0] = data;
+    const boostedAmount = Math.min(1, amount * PLANT_OUTPUT_BOOST);
     const control = Math.max(data1, data2) / 127;
-    const delta = Math.abs(amount - plantLastAmountRef.current);
+    const delta = Math.abs(boostedAmount - plantLastAmountRef.current);
     const elapsed = context.currentTime - plantLastPulseAtRef.current;
 
     if (!plantVoiceRef.current) {
@@ -457,26 +459,26 @@ function App() {
 
     const voice = plantVoiceRef.current;
     const scale = [48, 50, 53, 55, 57, 60, 62, 65, 67, 69];
-    const shouldPulse = delta > 0.006 || elapsed > 0.45;
+    const shouldPulse = delta > 0.003 || elapsed > 0.38;
     if (shouldPulse) {
-      plantStepRef.current += 1 + Math.floor(delta * 14);
+      plantStepRef.current += 1 + Math.floor(delta * 18);
       plantLastPulseAtRef.current = context.currentTime;
     }
     const note = scale[(Math.floor(control * scale.length) + plantStepRef.current) % scale.length];
-    const frequency = midiFrequency(note) * (1 + amount * 0.08);
+    const frequency = midiFrequency(note) * (1 + boostedAmount * 0.11);
     voice.oscillator.frequency.setTargetAtTime(frequency, context.currentTime, 0.025);
-    voice.filter.frequency.setTargetAtTime(520 + amount * 5200 + delta * 3600, context.currentTime, 0.035);
+    voice.filter.frequency.setTargetAtTime(520 + boostedAmount * 6200 + delta * 4600, context.currentTime, 0.035);
 
     if (shouldPulse) {
-      const peak = Math.min(0.32, 0.075 + amount * 0.22 + delta * 1.2);
+      const peak = Math.min(0.46, 0.11 + boostedAmount * 0.3 + delta * 1.45);
       voice.gain.gain.cancelScheduledValues(context.currentTime);
       voice.gain.gain.setValueAtTime(0.006, context.currentTime);
       voice.gain.gain.linearRampToValueAtTime(peak, context.currentTime + 0.025);
-      voice.gain.gain.exponentialRampToValueAtTime(0.012, context.currentTime + 0.22 + amount * 0.22);
+      voice.gain.gain.exponentialRampToValueAtTime(0.014, context.currentTime + 0.2 + boostedAmount * 0.2);
     } else {
-      voice.gain.gain.setTargetAtTime(0.012 + amount * 0.04, context.currentTime, 0.08);
+      voice.gain.gain.setTargetAtTime(0.016 + boostedAmount * 0.065, context.currentTime, 0.08);
     }
-    plantLastAmountRef.current = amount;
+    plantLastAmountRef.current = boostedAmount;
   }
 
   function releasePlantSignal() {

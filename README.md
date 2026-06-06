@@ -39,7 +39,7 @@ The MIDI monitor shows `PORTS`, `MESSAGES`, and `LAST MIDI`. After pressing Play
 
 Play calibrates the TouchMe baseline for about one second. Keep hands still during calibration; after that, the app starts Magenta only when TouchMe values change from the baseline.
 
-Small plant deviations are amplified after calibration so subtle leaf/soil changes can still become musical movement.
+Small plant deviations are strongly amplified after calibration so subtle leaf/soil changes can still become musical movement.
 
 The spectrogram visualizes the same synthesized plant input that is captured for Magenta, scrolling left over time with low frequencies at the bottom and higher frequencies at the top.
 
