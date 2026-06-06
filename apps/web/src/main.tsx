@@ -44,13 +44,13 @@ function App() {
   const socketRef = useRef<WebSocket | null>(null);
   const connectPromiseRef = useRef<Promise<WebSocket> | null>(null);
   const midiAccessRef = useRef<MidiAccessLike | null>(null);
+  const midiInputRef = useRef<MidiInputLike | null>(null);
   const midiVoicesRef = useRef<Map<number, MidiVoice>>(new Map());
 
   const [audioReady, setAudioReady] = useState(false);
   const [connected, setConnected] = useState(false);
   const [midiConnected, setMidiConnected] = useState(false);
-  const [midiInputs, setMidiInputs] = useState<MidiInputLike[]>([]);
-  const [selectedMidiId, setSelectedMidiId] = useState("");
+  const [armed, setArmed] = useState(false);
   const [live, setLive] = useState(false);
   const [level, setLevel] = useState(0);
   const [capturedFrames, setCapturedFrames] = useState(0);
@@ -103,15 +103,28 @@ function App() {
   }
 
   const captureEnabledRef = useRef(false);
+  const armedRef = useRef(false);
   const liveRef = useRef(false);
 
   function syncMidiInputs(access = midiAccessRef.current) {
     if (!access) return;
     const inputs = Array.from(access.inputs.values());
-    setMidiInputs(inputs);
-    if (!selectedMidiId && inputs[0]?.id) {
-      setSelectedMidiId(inputs[0].id);
+    if (midiInputRef.current && !inputs.some((input) => input.id === midiInputRef.current?.id)) {
+      midiInputRef.current = null;
+      setMidiConnected(false);
     }
+  }
+
+  function looksLikeTouchMe(input: MidiInputLike) {
+    const label = `${input.name || ""} ${input.manufacturer || ""}`.toLowerCase();
+    return label.includes("touchme") || label.includes("playtronica");
+  }
+
+  function pickTouchMeInput(inputs: MidiInputLike[]) {
+    const namedTouchMe = inputs.find(looksLikeTouchMe);
+    if (namedTouchMe) return namedTouchMe;
+    if (inputs.length === 1) return inputs[0];
+    return null;
   }
 
   async function ensureMidiAccess() {
@@ -128,15 +141,19 @@ function App() {
     return access;
   }
 
-  async function connectTouchMeMidi(inputId = selectedMidiId, quiet = false) {
+  async function connectTouchMeMidi(quiet = false) {
     await ensureAudio();
     const access = await ensureMidiAccess();
     if (!access) return false;
 
     const inputs = Array.from(access.inputs.values());
-    const input = inputs.find((device) => device.id === inputId) || inputs[0];
+    const input = pickTouchMeInput(inputs);
     if (!input) {
-      if (!quiet) setStatus("No MIDI input found. Connect the TouchMe board and retry.");
+      if (!quiet) {
+        setStatus(inputs.length > 0
+          ? "TouchMe was not detected. Disconnect other MIDI devices or reconnect the TouchMe board."
+          : "No TouchMe MIDI input found. Connect the board and retry.");
+      }
       return false;
     }
 
@@ -144,7 +161,7 @@ function App() {
       device.onmidimessage = null;
     });
     input.onmidimessage = handleMidiMessage;
-    setSelectedMidiId(input.id);
+    midiInputRef.current = input;
     setMidiConnected(true);
     captureEnabledRef.current = true;
     if (!quiet) setStatus(`TouchMe MIDI connected: ${input.name || "MIDI input"}.`);
@@ -155,6 +172,7 @@ function App() {
     midiAccessRef.current?.inputs.forEach((input) => {
       input.onmidimessage = null;
     });
+    midiInputRef.current = null;
     midiVoicesRef.current.forEach(({ oscillator, gain }) => {
       const context = audioRef.current;
       if (!context) return;
@@ -166,13 +184,6 @@ function App() {
     setStatus("TouchMe MIDI disconnected.");
   }
 
-  async function changeMidiInput(inputId: string) {
-    setSelectedMidiId(inputId);
-    if (midiConnected) {
-      await connectTouchMeMidi(inputId);
-    }
-  }
-
   function handleMidiMessage(event: { data: Uint8Array }) {
     const [statusByte, data1 = 0, data2 = 0] = event.data;
     const command = statusByte & 0xf0;
@@ -181,6 +192,7 @@ function App() {
 
     if (command === 0x90 && data2 > 0) {
       startMidiVoice(note, velocity);
+      void startStreamFromMidiSignal();
       return;
     }
     if (command === 0x80 || (command === 0x90 && data2 === 0)) {
@@ -189,6 +201,7 @@ function App() {
     }
     if (command === 0xb0) {
       updateMidiControl(data1, velocity);
+      if (data2 > 0) void startStreamFromMidiSignal();
     }
   }
 
@@ -299,16 +312,14 @@ function App() {
     return promise;
   }
 
-  async function startLiveStream() {
-    if (liveRef.current) return;
+  async function startStreamFromMidiSignal() {
+    if (!armedRef.current || liveRef.current) return;
     try {
-      await ensureAudio();
-      if (!midiConnected) {
-        void connectTouchMeMidi(selectedMidiId, true);
-      }
       const socket = await connectBridge();
       liveRef.current = true;
       setLive(true);
+      setArmed(false);
+      armedRef.current = false;
       setStatus("Starting live Magenta stream.");
       socket.send(JSON.stringify({ type: "magenta:stream:start" }));
     } catch {
@@ -318,12 +329,31 @@ function App() {
     }
   }
 
+  async function startLiveStream() {
+    if (armedRef.current || liveRef.current) return;
+    try {
+      await ensureAudio();
+      const inputReady = await connectTouchMeMidi();
+      if (!inputReady) return;
+      armedRef.current = true;
+      setArmed(true);
+      setStatus("Waiting for TouchMe MIDI signal.");
+    } catch {
+      armedRef.current = false;
+      setArmed(false);
+      setStatus("TouchMe MIDI was not opened. Check the board connection and browser MIDI permission.");
+    }
+  }
+
   function stopLiveStream() {
-    if (!liveRef.current) return;
+    if (!liveRef.current && !armedRef.current) return;
+    const wasLive = liveRef.current;
+    armedRef.current = false;
+    setArmed(false);
     liveRef.current = false;
     setLive(false);
     socketRef.current?.send(JSON.stringify({ type: "magenta:stream:stop" }));
-    setStatus("Stopping live stream.");
+    setStatus(wasLive ? "Stopping live stream." : "Waiting cancelled.");
   }
 
   return (
@@ -354,33 +384,15 @@ function App() {
           aria-label="Play live stream"
           className="playAction"
           onClick={startLiveStream}
-          disabled={live}
+          disabled={armed || live}
           title="Play"
         >
           <Play size={26} fill="currentColor" />
         </button>
-        <button className="primaryAction stopAction" onClick={stopLiveStream} disabled={!live}>
+        <button className="primaryAction stopAction" onClick={stopLiveStream} disabled={!armed && !live}>
           <Square size={18} />
           Stop
         </button>
-        <div className="sourcePicker">
-          <Music2 size={18} />
-          <select
-            aria-label="TouchMe MIDI input"
-            className="inputSelect"
-            value={selectedMidiId}
-            onChange={(event) => void changeMidiInput(event.target.value)}
-            onFocus={() => void ensureMidiAccess()}
-          >
-            {midiInputs.length === 0 ? (
-              <option value="">TouchMe MIDI input</option>
-            ) : midiInputs.map((input, index) => (
-              <option key={input.id} value={input.id}>
-                {input.name || input.manufacturer || `MIDI ${index + 1}`}
-              </option>
-            ))}
-          </select>
-        </div>
       </section>
 
       <section className="workspace">

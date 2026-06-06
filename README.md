@@ -22,14 +22,14 @@ In the browser:
 1. Attach the plant clip/sensor to the plant.
 2. Connect the sensor to the Playtronica TouchMe MIDI controller board.
 3. Connect TouchMe to the laptop over USB.
-4. In this app, click `Start Live Stream` and allow MIDI access if Chrome asks.
-5. Pick the TouchMe board from the MIDI input menu if it is not already selected.
-6. Wait for the `MIDI` and `Live` pills to turn on.
-7. Click `Stop Live Stream` to stop the continuous stream.
+4. In this app, click the Play button and allow MIDI access if Chrome asks.
+5. Wait for the `MIDI` pill to turn on.
+6. Touch or play the plant signal through TouchMe. The `Live` pill turns on after the first real MIDI signal.
+7. Click `Stop` to stop waiting or stop the continuous stream.
 
-`Start Live Stream` opens the browser audio engine, connects the local bridge, opens the TouchMe MIDI input, turns on metering, and starts a paced Magenta stream. The TouchMe MIDI gestures drive the local web synth signal that Magenta listens to. The first generation loads and warms up the model, so it can take a few seconds. After that, the worker stays alive and streams 40 ms Magenta frames to the browser as they are generated.
+The Play button opens the browser audio engine and connects directly to TouchMe MIDI. It does not use a mock signal. If TouchMe does not send plant MIDI, the app stays armed and silent. After the first real signal, it connects the local bridge and starts a paced Magenta stream. The first generation loads and warms up the model, so it can take a few seconds. After that, the worker stays alive and streams 40 ms Magenta frames to the browser as they are generated.
 
-The performance UI is intentionally minimal: start or stop the live stream, choose the TouchMe MIDI input if needed, and watch the input meter.
+The performance UI is intentionally minimal: play, stop, status pills, and the input meter.
 
 ## Magenta Setup
 
