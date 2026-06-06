@@ -351,13 +351,18 @@ function App() {
       </section>
 
       <section className="transport">
-        <button className="primaryAction startAction" onClick={startLiveStream} disabled={live}>
-          {audioReady ? <Check size={18} /> : <Play size={18} />}
-          Start Live Stream
+        <button
+          aria-label="Play live stream"
+          className="playAction"
+          onClick={startLiveStream}
+          disabled={live}
+          title="Play"
+        >
+          <Play size={26} fill="currentColor" />
         </button>
         <button className="primaryAction stopAction" onClick={stopLiveStream} disabled={!live}>
           <Square size={18} />
-          Stop Live Stream
+          Stop
         </button>
         <div className="sourcePicker">
           <Music2 size={18} />

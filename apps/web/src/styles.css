@@ -106,12 +106,21 @@ p {
 }
 
 .primaryAction {
-  min-width: 230px;
+  min-width: 132px;
   min-height: 56px;
   font-size: 1.05rem;
 }
 
-.startAction:not(:disabled) {
+.playAction {
+  width: 58px;
+  height: 58px;
+  min-width: 58px;
+  min-height: 58px;
+  border-radius: 999px;
+  padding: 0;
+}
+
+.playAction:not(:disabled) {
   background: #b9f2cc;
 }
 
