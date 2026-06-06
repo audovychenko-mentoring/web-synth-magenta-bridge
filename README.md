@@ -39,6 +39,8 @@ The MIDI monitor shows `PORTS`, `MESSAGES`, and `LAST MIDI`. After pressing Play
 
 Play calibrates the TouchMe baseline for about one second. Keep hands still during calibration; after that, the app starts Magenta only when TouchMe values change from the baseline.
 
+Small plant deviations are amplified after calibration so subtle leaf/soil changes can still become musical movement.
+
 ## Magenta Setup
 
 The bridge expects Magenta RT to be installed in `.venv` and the model assets to exist under `~/Documents/Magenta/magenta-rt-v2/`:

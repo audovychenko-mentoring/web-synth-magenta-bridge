@@ -36,6 +36,9 @@ function midiFrequency(note: number) {
   return 440 * 2 ** ((note - 69) / 12);
 }
 
+const PLANT_CHANGE_THRESHOLD = 0.0035;
+const PLANT_CHANGE_GAIN = 22;
+
 function errorMessage(error: unknown) {
   if (error instanceof Error) return `${error.name}: ${error.message}`;
   return String(error);
@@ -321,8 +324,9 @@ function App() {
       return;
     }
     const baselineDelta = Math.abs(amount - baseline);
-    const changedAmount = Math.min(1, Math.max(baselineDelta * 5, isNoteOn ? amount : 0));
-    const hasPlantChange = isNoteOn || baselineDelta > 0.035;
+    const amplifiedChange = Math.min(1, Math.pow(Math.max(0, baselineDelta - PLANT_CHANGE_THRESHOLD / 2) * PLANT_CHANGE_GAIN, 0.72));
+    const changedAmount = Math.max(amplifiedChange, isNoteOn ? amount : 0);
+    const hasPlantChange = isNoteOn || baselineDelta > PLANT_CHANGE_THRESHOLD;
     if (hasPlantChange && armedRef.current && now - lastMidiStatusAtRef.current > 250) {
       setStatus(`TouchMe plant change: ${messageText}.`);
       lastMidiStatusAtRef.current = now;
@@ -383,24 +387,24 @@ function App() {
 
     const voice = plantVoiceRef.current;
     const scale = [48, 50, 53, 55, 57, 60, 62, 65, 67, 69];
-    const shouldPulse = delta > 0.015 || elapsed > 0.65;
+    const shouldPulse = delta > 0.006 || elapsed > 0.45;
     if (shouldPulse) {
-      plantStepRef.current += 1 + Math.floor(delta * 8);
+      plantStepRef.current += 1 + Math.floor(delta * 14);
       plantLastPulseAtRef.current = context.currentTime;
     }
     const note = scale[(Math.floor(control * scale.length) + plantStepRef.current) % scale.length];
     const frequency = midiFrequency(note) * (1 + amount * 0.08);
     voice.oscillator.frequency.setTargetAtTime(frequency, context.currentTime, 0.025);
-    voice.filter.frequency.setTargetAtTime(520 + amount * 4200 + delta * 2600, context.currentTime, 0.035);
+    voice.filter.frequency.setTargetAtTime(520 + amount * 5200 + delta * 3600, context.currentTime, 0.035);
 
     if (shouldPulse) {
-      const peak = Math.min(0.26, 0.06 + amount * 0.16 + delta * 0.9);
+      const peak = Math.min(0.32, 0.075 + amount * 0.22 + delta * 1.2);
       voice.gain.gain.cancelScheduledValues(context.currentTime);
       voice.gain.gain.setValueAtTime(0.006, context.currentTime);
       voice.gain.gain.linearRampToValueAtTime(peak, context.currentTime + 0.025);
-      voice.gain.gain.exponentialRampToValueAtTime(0.012, context.currentTime + 0.28 + amount * 0.25);
+      voice.gain.gain.exponentialRampToValueAtTime(0.012, context.currentTime + 0.22 + amount * 0.22);
     } else {
-      voice.gain.gain.setTargetAtTime(0.01 + amount * 0.025, context.currentTime, 0.08);
+      voice.gain.gain.setTargetAtTime(0.012 + amount * 0.04, context.currentTime, 0.08);
     }
     plantLastAmountRef.current = amount;
   }
