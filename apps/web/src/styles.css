@@ -105,6 +105,12 @@ p {
   align-items: center;
 }
 
+.primaryAction {
+  min-width: 230px;
+  min-height: 56px;
+  font-size: 1.05rem;
+}
+
 .transport .active {
   background: #d7f4ff;
 }
@@ -117,82 +123,32 @@ p {
   max-width: min(360px, 100%);
 }
 
-.durationControl {
+.sourcePicker {
   border: 1px solid #1d1d1d;
   border-radius: 8px;
   background: #fffaf2;
-  display: inline-grid;
-  grid-template-columns: repeat(4, minmax(46px, 1fr));
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   min-height: 44px;
-  overflow: hidden;
+  padding: 0 10px;
   box-shadow: 0 2px 0 #1d1d1d;
 }
 
-.durationControl button {
+.sourcePicker select {
   border: 0;
-  border-right: 1px solid #1d1d1d;
   border-radius: 0;
-  min-height: 42px;
+  min-height: 40px;
   box-shadow: none;
   background: transparent;
-  padding: 0 10px;
-}
-
-.durationControl button:last-child {
-  border-right: 0;
-}
-
-.durationControl button.active {
-  background: #d7f4ff;
+  padding-left: 0;
 }
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
+  grid-template-columns: minmax(280px, 520px);
   gap: 20px;
   align-items: stretch;
-}
-
-.synthGrid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(180px, 1fr));
-  gap: 16px;
-}
-
-.voice {
-  --accent: #222;
-  min-height: 190px;
-  padding: 18px;
-  align-items: flex-start;
-  justify-content: space-between;
-  flex-direction: column;
-  background:
-    linear-gradient(0deg, color-mix(in srgb, var(--accent) 18%, #fffaf2), #fffaf2);
-  border-width: 2px;
-  transition:
-    transform 160ms ease,
-    background 160ms ease;
-}
-
-.voice:hover {
-  transform: translateY(-2px);
-}
-
-.voice.playing {
-  background: var(--accent);
-  color: white;
-}
-
-.voice span {
-  font-size: clamp(1.4rem, 4vw, 3.5rem);
-  line-height: 0.95;
-  font-weight: 900;
-}
-
-.voice strong {
-  font-size: 0.82rem;
-  text-transform: uppercase;
-  letter-spacing: 0;
 }
 
 .meterPanel {
@@ -246,9 +202,5 @@ p {
   .workspace {
     grid-template-columns: 1fr;
     display: grid;
-  }
-
-  .synthGrid {
-    grid-template-columns: 1fr;
   }
 }
