@@ -91,7 +91,7 @@ function midiPermissionMessage(error: unknown, permissionState = "unknown") {
       return "MIDI is marked allowed, but the browser still denied access. Reload this exact tab; if it still fails, open this app in the same Chrome profile where MIDI is allowed.";
     }
     const stateNote = permissionState === "unknown" ? "" : ` Browser reports MIDI permission: ${permissionState}.`;
-    return `MIDI permission is blocked.${stateNote} Open site settings for localhost, allow MIDI devices, reload, then press Play.`;
+    return `MIDI permission is blocked.${stateNote} Open site settings for localhost, allow MIDI devices, reload, then press Magenta or Suno.`;
   }
   if (message.includes("SecurityError")) {
     return "Web MIDI is blocked by the browser security settings. Open this app in Chrome or Edge on localhost.";
@@ -129,12 +129,14 @@ function App() {
   const sunoGeneratingRef = useRef(false);
   const sunoAudioRef = useRef<HTMLAudioElement | null>(null);
   const sunoSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const sunoConfiguredRef = useRef<boolean | null>(null);
 
   const [armed, setArmed] = useState(false);
   const [live, setLive] = useState(false);
   const [sunoGenerating, setSunoGenerating] = useState(false);
   const [targetEngine, setTargetEngine] = useState<GenerationEngine | null>(null);
   const [sunoAudioUrl, setSunoAudioUrl] = useState("");
+  const [sunoConfigured, setSunoConfigured] = useState<boolean | null>(null);
   const [level, setLevel] = useState(0);
   const [capturedFrames, setCapturedFrames] = useState(0);
   const [midiPortNames, setMidiPortNames] = useState("none");
@@ -456,6 +458,21 @@ function App() {
   function clearSunoAudio() {
     stopSunoAudio();
     setSunoAudioUrl("");
+  }
+
+  function waitForSunoConfiguredState(timeoutMs = 1200) {
+    if (sunoConfiguredRef.current !== null) return Promise.resolve(sunoConfiguredRef.current);
+    return new Promise<boolean | null>((resolve) => {
+      const startedAt = performance.now();
+      const poll = () => {
+        if (sunoConfiguredRef.current !== null || performance.now() - startedAt >= timeoutMs) {
+          resolve(sunoConfiguredRef.current);
+          return;
+        }
+        window.setTimeout(poll, 40);
+      };
+      poll();
+    });
   }
 
   async function ensureMidiAccess() {
@@ -825,7 +842,9 @@ function App() {
               : "Suno generation complete.");
           }
         } else if (message.type === "bridge:ready") {
-          setStatus(`Bridge ready in ${message.mode} mode (${message.model}).`);
+          sunoConfiguredRef.current = Boolean(message.sunoConfigured);
+          setSunoConfigured(Boolean(message.sunoConfigured));
+          setStatus(`Bridge ready in ${message.mode} mode (${message.model}).${message.sunoConfigured ? " Suno is configured." : " Suno needs SUNO_API_KEY."}`);
         } else if (message.type === "error") {
           liveRef.current = false;
           setLive(false);
@@ -884,6 +903,12 @@ function App() {
     if (armedRef.current || liveRef.current || sunoGeneratingRef.current) return;
     try {
       clearSunoAudio();
+      const socket = await connectBridge();
+      const sunoReady = engine === "suno" ? await waitForSunoConfiguredState() : sunoConfiguredRef.current;
+      if (engine === "suno" && sunoReady !== true) {
+        setStatus("Suno is not configured. Restart the bridge with SUNO_API_KEY=sk_live_your_key npm run dev.");
+        return;
+      }
       targetEngineRef.current = engine;
       setTargetEngine(engine);
       const inputReady = await connectTouchMeMidi();
@@ -910,6 +935,9 @@ function App() {
           ? `Listening on ${midiInputNames() || "MIDI input"}, but no MIDI messages received yet.`
           : `MIDI baseline is present. Touch or move the plant to create a change.`);
       }, 4500);
+      if (engine === "suno" && sunoConfiguredRef.current === null) {
+        socket.send(JSON.stringify({ type: "plant:pattern", plant: plantPatternSnapshot() }));
+      }
     } catch (error) {
       armedRef.current = false;
       setArmed(false);
@@ -1027,6 +1055,12 @@ function App() {
               </a>
             </div>
           ) : null}
+          <div>
+            <span className="label">Suno</span>
+            <strong className="debugValue">
+              {sunoConfigured === null ? "unknown" : sunoConfigured ? "configured" : "needs key"}
+            </strong>
+          </div>
           <div>
             <span className="label">Ports</span>
             <strong className="debugValue">{midiPortNames}</strong>

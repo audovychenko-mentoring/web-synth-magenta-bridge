@@ -329,7 +329,9 @@ server.on("connection", (socket) => {
     sampleRate: SAMPLE_RATE,
     channels: CHANNELS,
     mode: "magenta",
-    model: MODEL
+    model: MODEL,
+    sunoConfigured: Boolean(SUNO_API_KEY),
+    sunoBaseUrl: SUNO_BASE_URL
   });
 
   socket.on("message", async (data, isBinary) => {
