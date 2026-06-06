@@ -8,7 +8,7 @@ const PORT = Number(process.env.BRIDGE_PORT || 8787);
 const SAMPLE_RATE = 48000;
 const CHANNELS = 2;
 const MAX_CAPTURE_FRAMES = SAMPLE_RATE * 28;
-const MODEL = process.env.MAGENTA_MODEL || "mrt2_base";
+const MODEL = process.env.MAGENTA_MODEL || "mrt2_small";
 const DEFAULT_PROMPT =
   process.env.MAGENTA_PROMPT || "ambient plant music with soft evolving synths";
 const DEFAULT_DURATION = Number(process.env.MAGENTA_DURATION || 4);

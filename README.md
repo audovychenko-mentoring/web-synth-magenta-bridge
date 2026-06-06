@@ -40,10 +40,10 @@ mrt models init
 mrt models download
 ```
 
-By default, the bridge uses `mrt2_base`. Override with:
+By default, the bridge uses `mrt2_small` because it is the reliable realtime model for live streaming on Apple Silicon laptops. Use base explicitly when you want higher-quality offline/clip generation and your machine can keep up:
 
 ```bash
-MAGENTA_MODEL=mrt2_small npm run dev
+MAGENTA_MODEL=mrt2_base npm run dev
 ```
 
 ## Integration Plan
@@ -54,4 +54,4 @@ The current bridge uses a persistent Python/MLX worker. That gives us real incre
 - `RealtimeRunner::read_audio_stereo(...)` streams generated audio back to the browser.
 - optional audio phrase seeding can use `set_audio_prompt_samples(...)` or `prefill_state(...)`.
 
-For realtime work, use the MacBook with Apple Silicon. `mrt2_small` is the reliable realtime target; `mrt2_base` should be benchmarked locally before relying on it.
+For realtime work, use the MacBook with Apple Silicon. `mrt2_small` is the reliable realtime target; `mrt2_base` should be benchmarked locally before relying on it because underruns sound like distortion or crackling.

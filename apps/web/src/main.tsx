@@ -71,7 +71,7 @@ function App() {
     await context.audioWorklet.addModule("/worklets/stream-player-processor.js");
 
     const master = context.createGain();
-    master.gain.value = 0.75;
+    master.gain.value = 0.45;
     master.connect(context.destination);
 
     const capture = new AudioWorkletNode(context, "capture-processor", {
@@ -93,7 +93,7 @@ function App() {
       outputChannelCount: [2]
     });
     const generatedGain = context.createGain();
-    generatedGain.gain.value = 0.85;
+    generatedGain.gain.value = 0.6;
     player.connect(generatedGain).connect(context.destination);
 
     audioRef.current = context;
