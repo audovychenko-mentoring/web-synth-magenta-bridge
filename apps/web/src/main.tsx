@@ -85,7 +85,7 @@ function App() {
   const [live, setLive] = useState(false);
   const [level, setLevel] = useState(0);
   const [capturedFrames, setCapturedFrames] = useState(0);
-  const [status, setStatus] = useState("Connect TouchMe and start the live stream.");
+  const [status, setStatus] = useState("Press Play to listen for TouchMe MIDI.");
 
   async function ensureAudio() {
     if (audioRef.current) {
@@ -245,7 +245,7 @@ function App() {
     });
     midiVoicesRef.current.clear();
     stopPlantSignal();
-    setStatus("TouchMe MIDI disconnected.");
+    setStatus("TouchMe MIDI disconnected. Press Play to listen again.");
   }
 
   function handleMidiMessage(event: { data: Uint8Array }) {
@@ -517,7 +517,7 @@ function App() {
     }
     setLevel(0);
     setCapturedFrames(0);
-    setStatus(wasLive ? "Stopping live stream." : wasArmed ? "Waiting cancelled." : "Stopped.");
+    setStatus(wasLive ? "Stopping live stream." : wasArmed ? "Waiting cancelled. Press Play to listen again." : "Stopped. Press Play to listen again.");
   }
 
   return (
