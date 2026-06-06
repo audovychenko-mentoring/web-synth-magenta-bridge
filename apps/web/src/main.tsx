@@ -36,6 +36,22 @@ function midiFrequency(note: number) {
   return 440 * 2 ** ((note - 69) / 12);
 }
 
+function errorMessage(error: unknown) {
+  if (error instanceof Error) return `${error.name}: ${error.message}`;
+  return String(error);
+}
+
+function midiPermissionMessage(error: unknown) {
+  const message = errorMessage(error);
+  if (message.includes("NotAllowedError")) {
+    return "MIDI permission is blocked. Open site settings for localhost, allow MIDI devices, reload, then press Play.";
+  }
+  if (message.includes("SecurityError")) {
+    return "Web MIDI is blocked by the browser security settings. Open this app in Chrome or Edge on localhost.";
+  }
+  return `Browser MIDI permission failed (${message})`;
+}
+
 function App() {
   const audioRef = useRef<AudioContext | null>(null);
   const masterRef = useRef<GainNode | null>(null);
@@ -128,7 +144,12 @@ function App() {
       setStatus("This browser does not support Web MIDI. Use Chrome or Edge.");
       return null;
     }
-    const access = await midiNavigator.requestMIDIAccess() as MidiAccessLike;
+    let access: MidiAccessLike;
+    try {
+      access = await midiNavigator.requestMIDIAccess() as MidiAccessLike;
+    } catch (error) {
+      throw new Error(midiPermissionMessage(error));
+    }
     access.onstatechange = () => syncMidiInputs(access);
     midiAccessRef.current = access;
     syncMidiInputs(access);
@@ -328,10 +349,10 @@ function App() {
       armedRef.current = true;
       setArmed(true);
       setStatus("Waiting for TouchMe MIDI signal.");
-    } catch {
+    } catch (error) {
       armedRef.current = false;
       setArmed(false);
-      setStatus("TouchMe MIDI was not opened. Check the board connection and browser MIDI permission.");
+      setStatus(`TouchMe MIDI was not opened: ${error instanceof Error ? error.message : errorMessage(error)}`);
     }
   }
 

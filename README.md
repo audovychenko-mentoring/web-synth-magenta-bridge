@@ -31,6 +31,8 @@ The Play button opens the browser audio engine and connects directly to TouchMe 
 
 The performance UI is intentionally minimal: play, stop, status text, and the input meter.
 
+If Play reports that MIDI permission is blocked, open the browser site settings for `localhost:5173`, allow MIDI devices, reload the app, and press Play again.
+
 ## Magenta Setup
 
 The bridge expects Magenta RT to be installed in `.venv` and the model assets to exist under `~/Documents/Magenta/magenta-rt-v2/`:
