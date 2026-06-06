@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Cable, Circle, Play, Radio, RotateCcw, Sparkles, Square } from "lucide-react";
+import { Cable, Check, Circle, Play, Radio, RotateCcw, Sparkles, Square } from "lucide-react";
 import "./styles.css";
 
 type VoiceId = "bass" | "pad" | "pluck" | "drone";
@@ -60,6 +60,7 @@ function App() {
     if (audioRef.current) {
       await audioRef.current.resume();
       setAudioReady(true);
+      setStatus("Audio engine ready. Start a voice or route plant synth audio, then capture.");
       return audioRef.current;
     }
 
@@ -98,7 +99,7 @@ function App() {
     captureRef.current = capture;
     playerRef.current = player;
     setAudioReady(true);
-    setStatus("Audio engine ready.");
+    setStatus("Audio engine ready. Start a voice or route plant synth audio, then capture.");
     return context;
   }
 
@@ -114,6 +115,7 @@ function App() {
       running.oscillator.stop(now + 0.12);
       runningRef.current.delete(voice.id);
       setActiveVoices((state) => ({ ...state, [voice.id]: false }));
+      setStatus(`${voice.label} stopped.`);
       return;
     }
 
@@ -131,6 +133,7 @@ function App() {
     gain.gain.setTargetAtTime(voice.gain, context.currentTime, voice.id === "pad" ? 0.4 : 0.04);
     runningRef.current.set(voice.id, { oscillator, gain });
     setActiveVoices((state) => ({ ...state, [voice.id]: true }));
+    setStatus(`${voice.label} running. Capture will send the mixed synth output to the bridge.`);
   }
 
   function connectBridge() {
@@ -207,8 +210,9 @@ function App() {
       </section>
 
       <section className="transport">
-        <button onClick={ensureAudio}>
-          <Play size={18} /> Start Audio
+        <button className={audioReady ? "active" : ""} onClick={ensureAudio}>
+          {audioReady ? <Check size={18} /> : <Play size={18} />}
+          {audioReady ? "Audio Ready" : "Start Audio"}
         </button>
         <button onClick={connectBridge}>
           <Radio size={18} /> Connect
@@ -262,4 +266,3 @@ function App() {
 }
 
 createRoot(document.getElementById("root")!).render(<App />);
-
