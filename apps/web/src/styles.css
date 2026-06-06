@@ -146,6 +146,12 @@ p {
   font-size: 0.95rem !important;
 }
 
+.trackLink {
+  color: #0f766e;
+  font-weight: 800;
+  text-decoration-thickness: 2px;
+}
+
 .meter {
   height: 18px;
   border: 1px solid #1d1d1d;

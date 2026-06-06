@@ -128,11 +128,13 @@ function App() {
   const targetEngineRef = useRef<GenerationEngine | null>(null);
   const sunoGeneratingRef = useRef(false);
   const sunoAudioRef = useRef<HTMLAudioElement | null>(null);
+  const sunoSourceRef = useRef<AudioBufferSourceNode | null>(null);
 
   const [armed, setArmed] = useState(false);
   const [live, setLive] = useState(false);
   const [sunoGenerating, setSunoGenerating] = useState(false);
   const [targetEngine, setTargetEngine] = useState<GenerationEngine | null>(null);
+  const [sunoAudioUrl, setSunoAudioUrl] = useState("");
   const [level, setLevel] = useState(0);
   const [capturedFrames, setCapturedFrames] = useState(0);
   const [midiPortNames, setMidiPortNames] = useState("none");
@@ -143,7 +145,7 @@ function App() {
   const [midiBaselineDelta, setMidiBaselineDelta] = useState(0);
   const [midiPlantAmount, setMidiPlantAmount] = useState(0);
   const [midiInputState, setMidiInputState] = useState("idle");
-  const [status, setStatus] = useState("Press Play to listen for TouchMe MIDI.");
+  const [status, setStatus] = useState("Press Magenta or Suno to listen for TouchMe MIDI.");
 
   useEffect(() => () => {
     if (spectrogramFrameRef.current !== null) {
@@ -391,25 +393,69 @@ function App() {
   }
 
   async function playSunoAudio(url: string) {
-    sunoAudioRef.current?.pause();
-    const audio = new Audio(url);
-    audio.preload = "auto";
-    audio.onended = () => {
-      if (sunoAudioRef.current === audio) {
-        setStatus("Suno playback complete.");
-      }
-    };
-    sunoAudioRef.current = audio;
+    stopSunoAudio();
+    setSunoAudioUrl(url);
+
     try {
-      await audio.play();
-    } catch (error) {
-      setStatus(`Suno audio is ready, but the browser blocked autoplay: ${errorMessage(error)}`);
+      const context = await ensureAudio();
+      await context.resume();
+      setStatus("Loading Suno audio.");
+      const response = await fetch(url, { mode: "cors" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const audioData = await response.arrayBuffer();
+      const buffer = await context.decodeAudioData(audioData.slice(0));
+      const source = context.createBufferSource();
+      const gain = context.createGain();
+      gain.gain.value = 0.82;
+      source.buffer = buffer;
+      source.connect(gain).connect(context.destination);
+      source.onended = () => {
+        if (sunoSourceRef.current === source) {
+          sunoSourceRef.current = null;
+          setStatus("Suno playback complete.");
+        }
+      };
+      sunoSourceRef.current = source;
+      source.start();
+      setStatus("Playing Suno audio.");
+      return;
+    } catch (webAudioError) {
+      const audio = new Audio(url);
+      audio.crossOrigin = "anonymous";
+      audio.preload = "auto";
+      audio.onended = () => {
+        if (sunoAudioRef.current === audio) {
+          sunoAudioRef.current = null;
+          setStatus("Suno playback complete.");
+        }
+      };
+      sunoAudioRef.current = audio;
+      try {
+        await audio.play();
+      } catch (htmlAudioError) {
+        setStatus(`Suno audio is ready, but playback was blocked. Open the Suno track link below. ${errorMessage(htmlAudioError || webAudioError)}`);
+      }
     }
   }
 
   function stopSunoAudio() {
-    sunoAudioRef.current?.pause();
-    sunoAudioRef.current = null;
+    if (sunoSourceRef.current) {
+      try {
+        sunoSourceRef.current.stop();
+      } catch {
+        // Already stopped.
+      }
+      sunoSourceRef.current = null;
+    }
+    if (sunoAudioRef.current) {
+      sunoAudioRef.current.pause();
+      sunoAudioRef.current = null;
+    }
+  }
+
+  function clearSunoAudio() {
+    stopSunoAudio();
+    setSunoAudioUrl("");
   }
 
   async function ensureMidiAccess() {
@@ -764,13 +810,20 @@ function App() {
           }
         } else if (message.type === "suno:complete") {
           const shouldReportSunoComplete = sunoGeneratingRef.current || targetEngineRef.current === "suno";
+          if (typeof message.audioUrl === "string" && message.audioUrl) {
+            setSunoAudioUrl(message.audioUrl);
+          }
           sunoGeneratingRef.current = false;
           setSunoGenerating(false);
           if (targetEngineRef.current === "suno") {
             targetEngineRef.current = null;
             setTargetEngine(null);
           }
-          if (shouldReportSunoComplete) setStatus("Suno generation complete.");
+          if (shouldReportSunoComplete) {
+            setStatus(typeof message.audioUrl === "string" && message.audioUrl
+              ? "Suno generation complete. Playing audio."
+              : "Suno generation complete.");
+          }
         } else if (message.type === "bridge:ready") {
           setStatus(`Bridge ready in ${message.mode} mode (${message.model}).`);
         } else if (message.type === "error") {
@@ -830,7 +883,7 @@ function App() {
   async function startLiveStream(engine: GenerationEngine) {
     if (armedRef.current || liveRef.current || sunoGeneratingRef.current) return;
     try {
-      stopSunoAudio();
+      clearSunoAudio();
       targetEngineRef.current = engine;
       setTargetEngine(engine);
       const inputReady = await connectTouchMeMidi();
@@ -880,7 +933,7 @@ function App() {
     targetEngineRef.current = null;
     setTargetEngine(null);
     captureEnabledRef.current = false;
-    stopSunoAudio();
+    clearSunoAudio();
     midiAccessRef.current?.inputs.forEach((input) => {
       input.onmidimessage = null;
     });
@@ -966,6 +1019,14 @@ function App() {
             <span className="label">Spectrogram</span>
             <canvas ref={spectrogramCanvasRef} className="spectrogramCanvas" aria-label="Input spectrogram" />
           </div>
+          {sunoAudioUrl ? (
+            <div>
+              <span className="label">Suno Track</span>
+              <a className="debugValue trackLink" href={sunoAudioUrl} target="_blank" rel="noreferrer">
+                Open audio
+              </a>
+            </div>
+          ) : null}
           <div>
             <span className="label">Ports</span>
             <strong className="debugValue">{midiPortNames}</strong>
