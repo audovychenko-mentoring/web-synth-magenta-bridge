@@ -1,0 +1,19 @@
+{
+  "name": "web-synth-magenta-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/web",
+    "apps/bridge"
+  ],
+  "scripts": {
+    "dev": "concurrently -n bridge,web -c cyan,magenta \"npm run dev -w apps/bridge\" \"npm run dev -w apps/web\"",
+    "build": "npm run build -w apps/web",
+    "typecheck": "npm run typecheck -w apps/web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
+
