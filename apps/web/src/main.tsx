@@ -76,6 +76,9 @@ function App() {
   const midiInputsRef = useRef<MidiInputLike[]>([]);
   const midiVoicesRef = useRef<Map<number, MidiVoice>>(new Map());
   const plantVoiceRef = useRef<MidiVoice | null>(null);
+  const plantLastAmountRef = useRef(0);
+  const plantLastPulseAtRef = useRef(0);
+  const plantStepRef = useRef(0);
   const lastMidiStatusAtRef = useRef(0);
 
   const [armed, setArmed] = useState(false);
@@ -289,16 +292,19 @@ function App() {
     const context = audioRef.current;
     if (!context || !masterRef.current) return;
     const [, data1 = 0, data2 = 0] = data;
+    const control = Math.max(data1, data2) / 127;
+    const delta = Math.abs(amount - plantLastAmountRef.current);
+    const elapsed = context.currentTime - plantLastPulseAtRef.current;
 
     if (!plantVoiceRef.current) {
       const oscillator = context.createOscillator();
       const gain = context.createGain();
       const filter = context.createBiquadFilter();
-      oscillator.type = "sawtooth";
-      oscillator.frequency.value = 160;
+      oscillator.type = "triangle";
+      oscillator.frequency.value = 130;
       filter.type = "lowpass";
       filter.frequency.value = 1200;
-      filter.Q.value = 0.9;
+      filter.Q.value = 1.4;
       gain.gain.value = 0;
       oscillator.connect(filter).connect(gain).connect(masterRef.current);
       oscillator.start();
@@ -306,10 +312,27 @@ function App() {
     }
 
     const voice = plantVoiceRef.current;
-    const control = Math.max(data1, data2) / 127;
-    voice.oscillator.frequency.setTargetAtTime(90 + control * 540 + amount * 260, context.currentTime, 0.04);
-    voice.filter.frequency.setTargetAtTime(420 + amount * 3200, context.currentTime, 0.04);
-    voice.gain.gain.setTargetAtTime(0.035 + amount * 0.16, context.currentTime, 0.025);
+    const scale = [48, 50, 53, 55, 57, 60, 62, 65, 67, 69];
+    const shouldPulse = delta > 0.015 || elapsed > 0.65;
+    if (shouldPulse) {
+      plantStepRef.current += 1 + Math.floor(delta * 8);
+      plantLastPulseAtRef.current = context.currentTime;
+    }
+    const note = scale[(Math.floor(control * scale.length) + plantStepRef.current) % scale.length];
+    const frequency = midiFrequency(note) * (1 + amount * 0.08);
+    voice.oscillator.frequency.setTargetAtTime(frequency, context.currentTime, 0.025);
+    voice.filter.frequency.setTargetAtTime(520 + amount * 4200 + delta * 2600, context.currentTime, 0.035);
+
+    if (shouldPulse) {
+      const peak = Math.min(0.26, 0.06 + amount * 0.16 + delta * 0.9);
+      voice.gain.gain.cancelScheduledValues(context.currentTime);
+      voice.gain.gain.setValueAtTime(0.006, context.currentTime);
+      voice.gain.gain.linearRampToValueAtTime(peak, context.currentTime + 0.025);
+      voice.gain.gain.exponentialRampToValueAtTime(0.012, context.currentTime + 0.28 + amount * 0.25);
+    } else {
+      voice.gain.gain.setTargetAtTime(0.01 + amount * 0.025, context.currentTime, 0.08);
+    }
+    plantLastAmountRef.current = amount;
   }
 
   function releasePlantSignal() {
@@ -326,6 +349,9 @@ function App() {
     voice.gain.gain.setTargetAtTime(0, context.currentTime, 0.02);
     voice.oscillator.stop(context.currentTime + 0.08);
     plantVoiceRef.current = null;
+    plantLastAmountRef.current = 0;
+    plantLastPulseAtRef.current = 0;
+    plantStepRef.current = 0;
   }
 
   function startMidiVoice(note: number, velocity: number) {
