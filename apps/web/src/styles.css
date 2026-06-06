@@ -82,17 +82,12 @@ p {
   font-size: 1.05rem;
 }
 
-.playAction {
-  width: 58px;
-  height: 58px;
-  min-width: 58px;
-  min-height: 58px;
-  border-radius: 999px;
-  padding: 0;
+.magentaAction:not(:disabled) {
+  background: #b9f2cc;
 }
 
-.playAction:not(:disabled) {
-  background: #b9f2cc;
+.sunoAction:not(:disabled) {
+  background: #d7f4ff;
 }
 
 .stopAction:not(:disabled) {

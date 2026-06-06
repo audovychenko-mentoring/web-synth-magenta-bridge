@@ -15,6 +15,10 @@ const DEFAULT_DURATION = Number(process.env.MAGENTA_DURATION || 4);
 const MAX_DURATION = Number(process.env.MAGENTA_MAX_DURATION || 20);
 const MAGENTA_FRAME_RATE = 25;
 const LIVE_CHUNK_SECONDS = Number(process.env.MAGENTA_LIVE_CHUNK_SECONDS || 1);
+const SUNO_API_KEY = process.env.SUNO_API_KEY || "";
+const SUNO_BASE_URL = (process.env.SUNO_BASE_URL || "https://api.suno.com").replace(/\/+$/, "");
+const SUNO_POLL_INTERVAL_MS = Number(process.env.SUNO_POLL_INTERVAL_MS || 4000);
+const SUNO_TIMEOUT_MS = Number(process.env.SUNO_TIMEOUT_MS || 90000);
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "../../..");
 const pythonBin = resolve(repoRoot, ".venv/bin/python");
@@ -94,6 +98,105 @@ function plantPrompt(level, pattern = {}) {
   }
 
   return `${base}, sparse plant changes, delicate sustained tones, occasional small melodic responses, calm and musical`;
+}
+
+async function sunoResponseJson(response) {
+  const text = await response.text();
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    return { error: text || response.statusText };
+  }
+}
+
+async function sunoFetch(path, options = {}) {
+  if (!SUNO_API_KEY) {
+    throw new Error("SUNO_API_KEY is not set. Add it to the bridge environment and restart npm run dev.");
+  }
+
+  const response = await fetch(`${SUNO_BASE_URL}${path}`, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${SUNO_API_KEY}`,
+      "Content-Type": "application/json",
+      ...options.headers
+    }
+  });
+  const json = await sunoResponseJson(response);
+  if (!response.ok) {
+    throw new Error(json.error || `Suno API failed with HTTP ${response.status}`);
+  }
+  return json;
+}
+
+async function generateSuno(socket, { prompt, title = "Plant Signal Study" }) {
+  const submitted = await sunoFetch("/v0/audio", {
+    method: "POST",
+    body: JSON.stringify({
+      style: prompt,
+      title,
+      instrumental: true
+    })
+  });
+
+  if (!submitted.id) {
+    throw new Error("Suno did not return a generation id");
+  }
+
+  sendJson(socket, {
+    type: "suno:generate:start",
+    id: submitted.id,
+    status: submitted.status || "submitted",
+    prompt,
+    title
+  });
+
+  const startedAt = Date.now();
+  let audioUrlSent = false;
+  while (Date.now() - startedAt < SUNO_TIMEOUT_MS) {
+    await delay(SUNO_POLL_INTERVAL_MS);
+    const clip = await sunoFetch(`/v0/audio/${submitted.id}`, {
+      method: "GET"
+    });
+
+    sendJson(socket, {
+      type: "suno:status",
+      id: clip.id || submitted.id,
+      status: clip.status,
+      title: clip.title || title,
+      prompt,
+      error: clip.error || null
+    });
+
+    if (clip.audio_url && !audioUrlSent) {
+      audioUrlSent = true;
+      sendJson(socket, {
+        type: "suno:audio:ready",
+        id: clip.id || submitted.id,
+        status: clip.status,
+        title: clip.title || title,
+        prompt,
+        audioUrl: clip.audio_url
+      });
+    }
+
+    if (clip.status === "complete") {
+      sendJson(socket, {
+        type: "suno:complete",
+        id: clip.id || submitted.id,
+        title: clip.title || title,
+        prompt,
+        audioUrl: clip.audio_url || ""
+      });
+      return clip;
+    }
+
+    if (clip.status === "error") {
+      throw new Error(clip.error || "Suno generation failed");
+    }
+  }
+
+  throw new Error("Suno generation timed out before completion");
 }
 
 function workerLogs() {
@@ -213,6 +316,7 @@ server.on("connection", (socket) => {
   let packetCount = 0;
   let lastLevel = 0;
   let isGenerating = false;
+  let isSunoGenerating = false;
   let live = {
     running: false,
     prompt: "",
@@ -333,6 +437,35 @@ server.on("connection", (socket) => {
         live.running = false;
         isGenerating = false;
         sendJson(socket, { type: "magenta:live:stop" });
+      }
+      return;
+    }
+
+    if (message.type === "suno:generate") {
+      if (isSunoGenerating) {
+        sendJson(socket, { type: "error", message: "Suno is already generating" });
+        return;
+      }
+
+      const plant = normalizePlantPattern(message.plant || live.plant);
+      live.plant = plant;
+      const prompt = typeof message.prompt === "string" && message.prompt.trim()
+        ? message.prompt.trim()
+        : plantPrompt(lastLevel || rms(capture), plant);
+      const title = typeof message.title === "string" && message.title.trim()
+        ? message.title.trim()
+        : "Plant Signal Study";
+
+      isSunoGenerating = true;
+      try {
+        await generateSuno(socket, { prompt, title });
+      } catch (error) {
+        sendJson(socket, {
+          type: "error",
+          message: error instanceof Error ? error.message : String(error)
+        });
+      } finally {
+        isSunoGenerating = false;
       }
       return;
     }
