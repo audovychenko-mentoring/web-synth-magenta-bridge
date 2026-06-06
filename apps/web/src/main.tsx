@@ -80,11 +80,16 @@ function App() {
   const plantLastPulseAtRef = useRef(0);
   const plantStepRef = useRef(0);
   const lastMidiStatusAtRef = useRef(0);
+  const midiMessageCountRef = useRef(0);
+  const midiNoSignalTimerRef = useRef<number | null>(null);
 
   const [armed, setArmed] = useState(false);
   const [live, setLive] = useState(false);
   const [level, setLevel] = useState(0);
   const [capturedFrames, setCapturedFrames] = useState(0);
+  const [midiPortNames, setMidiPortNames] = useState("none");
+  const [midiMessageCount, setMidiMessageCount] = useState(0);
+  const [lastMidiMessage, setLastMidiMessage] = useState("none");
   const [status, setStatus] = useState("Press Play to listen for TouchMe MIDI.");
 
   async function ensureAudio() {
@@ -159,6 +164,12 @@ function App() {
     return inputs.map((input) => input.name || input.manufacturer || "MIDI input").join(", ");
   }
 
+  function clearNoSignalTimer() {
+    if (midiNoSignalTimerRef.current === null) return;
+    window.clearTimeout(midiNoSignalTimerRef.current);
+    midiNoSignalTimerRef.current = null;
+  }
+
   function midiMessageText(data: Uint8Array) {
     const [statusByte, data1 = 0, data2 = 0] = data;
     const command = statusByte & 0xf0;
@@ -226,6 +237,10 @@ function App() {
       input.onmidimessage = handleMidiMessage;
     });
     midiInputsRef.current = touchMeInputs;
+    setMidiPortNames(midiInputNames(touchMeInputs));
+    midiMessageCountRef.current = 0;
+    setMidiMessageCount(0);
+    setLastMidiMessage("none");
     captureEnabledRef.current = true;
     if (!quiet) setStatus(`TouchMe MIDI connected: ${midiInputNames(touchMeInputs)}.`);
     return true;
@@ -236,6 +251,10 @@ function App() {
       input.onmidimessage = null;
     });
     midiInputsRef.current = [];
+    setMidiPortNames("none");
+    midiMessageCountRef.current = 0;
+    setMidiMessageCount(0);
+    setLastMidiMessage("none");
     captureEnabledRef.current = false;
     midiVoicesRef.current.forEach(({ oscillator, gain }) => {
       const context = audioRef.current;
@@ -255,9 +274,15 @@ function App() {
     const velocity = data2 / 127;
     const amount = midiSignalAmount(event.data);
     const now = performance.now();
+    const messageText = midiMessageText(event.data);
+
+    clearNoSignalTimer();
+    midiMessageCountRef.current += 1;
+    setMidiMessageCount(midiMessageCountRef.current);
+    setLastMidiMessage(messageText);
 
     if (armedRef.current && now - lastMidiStatusAtRef.current > 250) {
-      setStatus(`TouchMe MIDI received: ${midiMessageText(event.data)}.`);
+      setStatus(`TouchMe MIDI received: ${messageText}.`);
       lastMidiStatusAtRef.current = now;
     }
 
@@ -484,6 +509,11 @@ function App() {
       armedRef.current = true;
       setArmed(true);
       setStatus(`Waiting for TouchMe MIDI signal from ${midiInputNames() || "MIDI input"}.`);
+      clearNoSignalTimer();
+      midiNoSignalTimerRef.current = window.setTimeout(() => {
+        if (!armedRef.current || midiMessageCountRef.current > 0) return;
+        setStatus(`Listening on ${midiInputNames() || "MIDI input"}, but no MIDI messages received yet.`);
+      }, 3500);
     } catch (error) {
       armedRef.current = false;
       setArmed(false);
@@ -494,6 +524,7 @@ function App() {
   function stopLiveStream() {
     const wasLive = liveRef.current;
     const wasArmed = armedRef.current;
+    clearNoSignalTimer();
     armedRef.current = false;
     setArmed(false);
     liveRef.current = false;
@@ -503,6 +534,7 @@ function App() {
       input.onmidimessage = null;
     });
     midiInputsRef.current = [];
+    setMidiPortNames("none");
     midiVoicesRef.current.forEach(({ oscillator, gain }) => {
       const context = audioRef.current;
       if (!context) return;
@@ -517,6 +549,9 @@ function App() {
     }
     setLevel(0);
     setCapturedFrames(0);
+    midiMessageCountRef.current = 0;
+    setMidiMessageCount(0);
+    setLastMidiMessage("none");
     setStatus(wasLive ? "Stopping live stream." : wasArmed ? "Waiting cancelled. Press Play to listen again." : "Stopped. Press Play to listen again.");
   }
 
@@ -557,6 +592,18 @@ function App() {
           </div>
           <div className="meter">
             <span style={{ transform: `scaleX(${Math.min(1, level * 12)})` }} />
+          </div>
+          <div>
+            <span className="label">Ports</span>
+            <strong className="debugValue">{midiPortNames}</strong>
+          </div>
+          <div>
+            <span className="label">Messages</span>
+            <strong>{midiMessageCount}</strong>
+          </div>
+          <div>
+            <span className="label">Last MIDI</span>
+            <strong className="debugValue">{lastMidiMessage}</strong>
           </div>
         </div>
       </section>

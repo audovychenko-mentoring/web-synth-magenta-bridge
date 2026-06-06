@@ -35,6 +35,8 @@ If Play reports that MIDI permission is blocked, open the browser site settings 
 
 If the app says it is waiting for TouchMe MIDI signal, it has opened the MIDI device but has not received plant data yet. Touch the plant/TouchMe input and watch the status text: it should change to `TouchMe MIDI received: ...`. The app listens to every Playtron/TouchMe MIDI port it can see. If it stays waiting, the TouchMe board is connected but not sending MIDI into the browser.
 
+The MIDI monitor shows `PORTS`, `MESSAGES`, and `LAST MIDI`. After pressing Play, `MESSAGES` should increase when you touch TouchMe. If it stays `0`, the browser sees the ports but no MIDI bytes are arriving.
+
 ## Magenta Setup
 
 The bridge expects Magenta RT to be installed in `.venv` and the model assets to exist under `~/Documents/Magenta/magenta-rt-v2/`:
