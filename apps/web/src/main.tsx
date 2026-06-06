@@ -128,7 +128,7 @@ function App() {
     return access;
   }
 
-  async function connectTouchMeMidi(inputId = selectedMidiId) {
+  async function connectTouchMeMidi(inputId = selectedMidiId, quiet = false) {
     await ensureAudio();
     const access = await ensureMidiAccess();
     if (!access) return false;
@@ -136,7 +136,7 @@ function App() {
     const inputs = Array.from(access.inputs.values());
     const input = inputs.find((device) => device.id === inputId) || inputs[0];
     if (!input) {
-      setStatus("No MIDI input found. Connect the TouchMe board and retry.");
+      if (!quiet) setStatus("No MIDI input found. Connect the TouchMe board and retry.");
       return false;
     }
 
@@ -147,7 +147,7 @@ function App() {
     setSelectedMidiId(input.id);
     setMidiConnected(true);
     captureEnabledRef.current = true;
-    setStatus(`TouchMe MIDI connected: ${input.name || "MIDI input"}.`);
+    if (!quiet) setStatus(`TouchMe MIDI connected: ${input.name || "MIDI input"}.`);
     return true;
   }
 
@@ -304,8 +304,7 @@ function App() {
     try {
       await ensureAudio();
       if (!midiConnected) {
-        const inputReady = await connectTouchMeMidi();
-        if (!inputReady) return;
+        void connectTouchMeMidi(selectedMidiId, true);
       }
       const socket = await connectBridge();
       liveRef.current = true;
@@ -315,7 +314,7 @@ function App() {
     } catch {
       liveRef.current = false;
       setLive(false);
-      setStatus("TouchMe MIDI was not opened. Check the board connection and browser MIDI permission.");
+      setStatus("Live stream could not start. Check that the bridge is running.");
     }
   }
 
