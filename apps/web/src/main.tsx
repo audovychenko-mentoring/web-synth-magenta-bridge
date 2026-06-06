@@ -1,6 +1,6 @@
 import React, { useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Cable, Check, Circle, Music2, Play, Radio, Square } from "lucide-react";
+import { Play, Square } from "lucide-react";
 import "./styles.css";
 
 type MidiInputLike = {
@@ -47,9 +47,6 @@ function App() {
   const midiInputRef = useRef<MidiInputLike | null>(null);
   const midiVoicesRef = useRef<Map<number, MidiVoice>>(new Map());
 
-  const [audioReady, setAudioReady] = useState(false);
-  const [connected, setConnected] = useState(false);
-  const [midiConnected, setMidiConnected] = useState(false);
   const [armed, setArmed] = useState(false);
   const [live, setLive] = useState(false);
   const [level, setLevel] = useState(0);
@@ -59,7 +56,6 @@ function App() {
   async function ensureAudio() {
     if (audioRef.current) {
       await audioRef.current.resume();
-      setAudioReady(true);
       return audioRef.current;
     }
 
@@ -97,7 +93,6 @@ function App() {
     masterRef.current = master;
     captureRef.current = capture;
     playerRef.current = player;
-    setAudioReady(true);
     setStatus("Audio engine ready.");
     return context;
   }
@@ -111,7 +106,6 @@ function App() {
     const inputs = Array.from(access.inputs.values());
     if (midiInputRef.current && !inputs.some((input) => input.id === midiInputRef.current?.id)) {
       midiInputRef.current = null;
-      setMidiConnected(false);
     }
   }
 
@@ -162,7 +156,6 @@ function App() {
     });
     input.onmidimessage = handleMidiMessage;
     midiInputRef.current = input;
-    setMidiConnected(true);
     captureEnabledRef.current = true;
     if (!quiet) setStatus(`TouchMe MIDI connected: ${input.name || "MIDI input"}.`);
     return true;
@@ -180,7 +173,6 @@ function App() {
       oscillator.stop(context.currentTime + 0.08);
     });
     midiVoicesRef.current.clear();
-    setMidiConnected(false);
     setStatus("TouchMe MIDI disconnected.");
   }
 
@@ -257,7 +249,6 @@ function App() {
     socket.binaryType = "arraybuffer";
     const promise = new Promise<WebSocket>((resolve, reject) => {
       socket.onopen = () => {
-        setConnected(true);
         setStatus("Bridge connected.");
         connectPromiseRef.current = null;
         resolve(socket);
@@ -269,7 +260,6 @@ function App() {
       };
     });
     socket.onclose = () => {
-      setConnected(false);
       liveRef.current = false;
       setLive(false);
       setStatus("Bridge disconnected.");
@@ -362,20 +352,6 @@ function App() {
         <div>
           <h1>Web Synth Magenta Bridge</h1>
           <p>{status}</p>
-        </div>
-        <div className="statusStrip">
-          <span className={audioReady ? "pill on" : "pill"}>
-            <Circle size={12} fill="currentColor" /> Audio
-          </span>
-          <span className={connected ? "pill on" : "pill"}>
-            <Cable size={14} /> Bridge
-          </span>
-          <span className={midiConnected ? "pill on" : "pill"}>
-            <Music2 size={14} /> MIDI
-          </span>
-          <span className={live ? "pill on" : "pill"}>
-            <Radio size={14} /> Live
-          </span>
         </div>
       </section>
 
