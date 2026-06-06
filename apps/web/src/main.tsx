@@ -156,7 +156,9 @@ function App() {
 
     const master = context.createGain();
     master.gain.value = 0.45;
-    master.connect(context.destination);
+    const silentMonitor = context.createGain();
+    silentMonitor.gain.value = 0;
+    master.connect(silentMonitor).connect(context.destination);
 
     const analyser = context.createAnalyser();
     analyser.fftSize = 1024;
