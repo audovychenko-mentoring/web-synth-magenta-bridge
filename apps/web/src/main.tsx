@@ -49,7 +49,7 @@ function App() {
   });
   const [level, setLevel] = useState(0);
   const [capturedFrames, setCapturedFrames] = useState(0);
-  const [status, setStatus] = useState("Start audio, connect the bridge, then capture a phrase.");
+  const [status, setStatus] = useState("Start audio, connect the bridge, then generate with Magenta.");
 
   const activeCount = useMemo(
     () => Object.values(activeVoices).filter(Boolean).length,
@@ -60,7 +60,7 @@ function App() {
     if (audioRef.current) {
       await audioRef.current.resume();
       setAudioReady(true);
-      setStatus("Audio engine ready. Start a voice or route plant synth audio, then capture.");
+      setStatus("Audio engine ready. Start a voice or route plant synth audio, then generate.");
       return audioRef.current;
     }
 
@@ -99,7 +99,7 @@ function App() {
     captureRef.current = capture;
     playerRef.current = player;
     setAudioReady(true);
-    setStatus("Audio engine ready. Start a voice or route plant synth audio, then capture.");
+    setStatus("Audio engine ready. Start a voice or route plant synth audio, then generate.");
     return context;
   }
 
@@ -133,7 +133,7 @@ function App() {
     gain.gain.setTargetAtTime(voice.gain, context.currentTime, voice.id === "pad" ? 0.4 : 0.04);
     runningRef.current.set(voice.id, { oscillator, gain });
     setActiveVoices((state) => ({ ...state, [voice.id]: true }));
-    setStatus(`${voice.label} running. Capture will send the mixed synth output to the bridge.`);
+    setStatus(`${voice.label} running. Generate will ask Magenta for real model audio.`);
   }
 
   function connectBridge() {
@@ -155,14 +155,16 @@ function App() {
         if (message.type === "capture:meter") {
           setLevel(message.rms);
           setCapturedFrames(message.frames);
-        } else if (message.type === "magenta:prefill:start") {
-          setStatus(`Mock Magenta prefill: ${message.seconds.toFixed(1)}s captured.`);
+        } else if (message.type === "magenta:generate:start") {
+          setStatus(`Generating ${message.duration.toFixed(1)}s with ${message.model}: "${message.prompt}"`);
         } else if (message.type === "magenta:audio:start") {
-          setStatus("Streaming mock continuation back from bridge.");
+          setStatus(`Receiving ${message.model} audio from Magenta.`);
         } else if (message.type === "magenta:audio:end") {
-          setStatus("Continuation received. Native Magenta will replace this mock.");
+          setStatus("Real Magenta audio received.");
         } else if (message.type === "bridge:ready") {
-          setStatus(`Bridge ready in ${message.mode} mode.`);
+          setStatus(`Bridge ready in ${message.mode} mode (${message.model}).`);
+        } else if (message.type === "error") {
+          setStatus(message.message);
         }
         return;
       }
@@ -184,12 +186,12 @@ function App() {
     const next = !capturing;
     captureEnabledRef.current = next;
     setCapturing(next);
-    setStatus(next ? "Capturing synth output for Magenta." : "Capture paused.");
+    setStatus(next ? "Metering synth output for Magenta context." : "Meter paused.");
   }
 
   async function continueWithMagenta() {
     await ensureAudio();
-    socketRef.current?.send(JSON.stringify({ type: "magenta:prefill" }));
+    socketRef.current?.send(JSON.stringify({ type: "magenta:generate", duration: 4 }));
   }
 
   return (
@@ -218,10 +220,10 @@ function App() {
           <Radio size={18} /> Connect
         </button>
         <button className={capturing ? "active" : ""} onClick={toggleCapture}>
-          {capturing ? <Square size={18} /> : <Circle size={18} />} Capture
+          {capturing ? <Square size={18} /> : <Circle size={18} />} Meter
         </button>
-        <button onClick={continueWithMagenta} disabled={!connected || capturedFrames === 0}>
-          <Sparkles size={18} /> Continue
+        <button onClick={continueWithMagenta} disabled={!connected}>
+          <Sparkles size={18} /> Generate
         </button>
         <button className="ghost" onClick={clearCapture}>
           <RotateCcw size={18} /> Clear
@@ -245,7 +247,7 @@ function App() {
 
         <div className="meterPanel">
           <div>
-            <span className="label">Captured</span>
+            <span className="label">Metered</span>
             <strong>{(capturedFrames / 48000).toFixed(1)}s</strong>
           </div>
           <div>

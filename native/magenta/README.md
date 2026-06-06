@@ -15,14 +15,13 @@ target_link_libraries(magenta_bridge PRIVATE magentart::core)
 The browser bridge contract is already established by `apps/bridge`:
 
 - input: 48 kHz stereo Float32 PCM, interleaved `[L, R, L, R, ...]`
-- capture cap: 28 seconds, matching Magenta RT's current SpectroStream prefill encoder shape
 - output: 48 kHz stereo Float32 PCM, interleaved
 
-The first native replacement should:
+The current bridge uses the Python/MLX package as an interim real-audio path. The native replacement should:
 
 1. Load resources from `~/Documents/Magenta/magenta-rt-v2/resources`.
-2. Load `mrt2_small` by default.
-3. Call `RealtimeRunner::load_prefill_model(...)`.
-4. On `magenta:prefill`, call `RealtimeRunner::prefill_state(...)`.
+2. Load `mrt2_small` by default, with `mrt2_base` as an option.
+3. Start a persistent `RealtimeRunner`.
+4. Map plant/Web Synth events to `set_note_on`, `set_note_off`, prompt weights, and sampling parameters.
 5. Stream `RealtimeRunner::read_audio_stereo(...)` chunks back to the browser.
-
+6. Keep `prefill_state(...)` optional for phrase-seeded continuation.

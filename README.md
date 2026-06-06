@@ -1,12 +1,12 @@
 # Web Synth Magenta Bridge
 
-A browser-based synth collection designed to feed audio into Magenta RealTime 2 through a local bridge process.
+A browser-based synth collection connected to Magenta RealTime 2 through a local bridge process.
 
-This repo starts with a working browser-to-bridge audio path:
+This repo currently has a working browser-to-bridge-to-Magenta path:
 
 - `apps/web`: Vite + React Web Audio synth collection.
-- `apps/bridge`: local WebSocket bridge that receives stereo Float32 PCM and streams a mock continuation back.
-- `native/magenta`: placeholder for the C++ Magenta RT integration.
+- `apps/bridge`: local WebSocket bridge that calls the installed Python/MLX Magenta RT package and streams stereo Float32 PCM back to the browser.
+- `native/magenta`: notes for the lower-latency C++ `RealtimeRunner` integration.
 
 ## Run
 
@@ -17,13 +17,30 @@ npm run dev
 
 Open the web app at `http://localhost:5173` and keep the bridge running at `ws://localhost:8787`.
 
+## Magenta Setup
+
+The bridge expects Magenta RT to be installed in `.venv` and the model assets to exist under `~/Documents/Magenta/magenta-rt-v2/`:
+
+```bash
+uv venv --python 3.12
+source .venv/bin/activate
+uv pip install "magenta-rt[mlx]"
+mrt models init
+mrt models download
+```
+
+By default, the bridge uses `mrt2_base`. Override with:
+
+```bash
+MAGENTA_MODEL=mrt2_small npm run dev
+```
+
 ## Integration Plan
 
-The bridge currently returns a mock generated signal. Replace that mock with Magenta RT by wiring the captured 48 kHz stereo PCM into:
+The current bridge launches a short-lived Python generator per request. That gives us real Magenta audio immediately, but the next production step is a persistent native bridge using `magentart::core::RealtimeRunner`:
 
-- `RealtimeRunner::set_audio_prompt_samples(...)` for style conditioning.
-- `RealtimeRunner::prefill_state(...)` for continuation from the captured synth phrase.
-- `RealtimeRunner::read_audio_stereo(...)` to stream generated audio back to the browser.
+- plant/Web Synth events map to live note and parameter controls.
+- `RealtimeRunner::read_audio_stereo(...)` streams generated audio back to the browser.
+- optional audio phrase seeding can use `set_audio_prompt_samples(...)` or `prefill_state(...)`.
 
 For realtime work, use the MacBook with Apple Silicon. `mrt2_small` is the reliable realtime target; `mrt2_base` should be benchmarked locally before relying on it.
-

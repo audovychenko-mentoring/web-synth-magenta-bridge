@@ -1,9 +1,21 @@
 import { WebSocketServer } from "ws";
+import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const PORT = Number(process.env.BRIDGE_PORT || 8787);
 const SAMPLE_RATE = 48000;
 const CHANNELS = 2;
 const MAX_CAPTURE_FRAMES = SAMPLE_RATE * 28;
+const MODEL = process.env.MAGENTA_MODEL || "mrt2_base";
+const DEFAULT_PROMPT =
+  process.env.MAGENTA_PROMPT || "ambient plant music with soft evolving synths";
+const DEFAULT_DURATION = Number(process.env.MAGENTA_DURATION || 4);
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const repoRoot = resolve(__dirname, "../../..");
+const pythonBin = resolve(repoRoot, ".venv/bin/python");
+const generatorScript = resolve(__dirname, "../scripts/generate_magenta.py");
 
 const server = new WebSocketServer({ port: PORT });
 
@@ -14,42 +26,88 @@ function rms(float32) {
   return Math.sqrt(sum / float32.length);
 }
 
-function makeMockContinuation(frames, level) {
-  const out = new Float32Array(frames * CHANNELS);
-  const gain = Math.min(0.22, Math.max(0.04, level * 1.8));
-  const base = 110 + Math.round(level * 900);
-  for (let i = 0; i < frames; i += 1) {
-    const t = i / SAMPLE_RATE;
-    const env = Math.min(1, i / 2400) * Math.min(1, (frames - i) / 9600);
-    const sample =
-      Math.sin(2 * Math.PI * base * t) * 0.55 +
-      Math.sin(2 * Math.PI * base * 1.5 * t) * 0.25 +
-      Math.sin(2 * Math.PI * base * 2.01 * t) * 0.12;
-    out[i * 2] = sample * gain * env;
-    out[i * 2 + 1] = sample * gain * env;
-  }
-  return out;
-}
-
 function sendJson(socket, payload) {
   if (socket.readyState === socket.OPEN) {
     socket.send(JSON.stringify(payload));
   }
 }
 
+function plantPrompt(level) {
+  if (level > 0.08) {
+    return `${DEFAULT_PROMPT}, dense and reactive, strong pulsing rhythm`;
+  }
+  if (level > 0.025) {
+    return `${DEFAULT_PROMPT}, gently pulsing, organic electronic texture`;
+  }
+  return DEFAULT_PROMPT;
+}
+
+function generateMagenta({ prompt, duration }) {
+  return new Promise((resolvePromise, reject) => {
+    if (!existsSync(pythonBin)) {
+      reject(new Error(`Python virtualenv not found at ${pythonBin}`));
+      return;
+    }
+    if (!existsSync(generatorScript)) {
+      reject(new Error(`Generator script not found at ${generatorScript}`));
+      return;
+    }
+
+    const child = spawn(
+      pythonBin,
+      [
+        generatorScript,
+        "--model",
+        MODEL,
+        "--prompt",
+        prompt,
+        "--duration",
+        String(duration)
+      ],
+      {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          PYTHONUNBUFFERED: "1"
+        },
+        stdio: ["ignore", "pipe", "pipe"]
+      }
+    );
+
+    const stdout = [];
+    const stderr = [];
+    child.stdout.on("data", (chunk) => stdout.push(chunk));
+    child.stderr.on("data", (chunk) => stderr.push(chunk));
+    child.on("error", reject);
+    child.on("close", (code) => {
+      const logs = Buffer.concat(stderr).toString("utf8").trim();
+      if (code !== 0) {
+        reject(new Error(logs || `Magenta generator exited with ${code}`));
+        return;
+      }
+      resolvePromise({
+        audio: Buffer.concat(stdout),
+        logs
+      });
+    });
+  });
+}
+
 server.on("connection", (socket) => {
   let capture = new Float32Array(0);
   let packetCount = 0;
   let lastLevel = 0;
+  let isGenerating = false;
 
   sendJson(socket, {
     type: "bridge:ready",
     sampleRate: SAMPLE_RATE,
     channels: CHANNELS,
-    mode: "mock"
+    mode: "magenta",
+    model: MODEL
   });
 
-  socket.on("message", (data, isBinary) => {
+  socket.on("message", async (data, isBinary) => {
     if (isBinary) {
       const chunk = new Float32Array(data.buffer, data.byteOffset, data.byteLength / 4);
       const availableFrames = Math.max(0, MAX_CAPTURE_FRAMES - capture.length / CHANNELS);
@@ -88,25 +146,55 @@ server.on("connection", (socket) => {
       return;
     }
 
-    if (message.type === "magenta:prefill") {
+    if (message.type === "magenta:prefill" || message.type === "magenta:generate") {
+      if (isGenerating) {
+        sendJson(socket, { type: "error", message: "Magenta is already generating" });
+        return;
+      }
+
       const frames = capture.length / CHANNELS;
+      const prompt = typeof message.prompt === "string" && message.prompt.trim()
+        ? message.prompt.trim()
+        : plantPrompt(lastLevel || rms(capture));
+      const duration = Number.isFinite(Number(message.duration))
+        ? Math.max(1, Math.min(12, Number(message.duration)))
+        : DEFAULT_DURATION;
+
       sendJson(socket, {
-        type: "magenta:prefill:start",
+        type: "magenta:generate:start",
         frames,
         seconds: frames / SAMPLE_RATE,
-        mode: "mock"
+        prompt,
+        duration,
+        mode: "magenta",
+        model: MODEL
       });
 
-      const generated = makeMockContinuation(SAMPLE_RATE * 4, lastLevel || rms(capture));
-      sendJson(socket, {
-        type: "magenta:audio:start",
-        frames: generated.length / CHANNELS,
-        sampleRate: SAMPLE_RATE,
-        channels: CHANNELS,
-        mode: "mock"
-      });
-      socket.send(Buffer.from(generated.buffer));
-      sendJson(socket, { type: "magenta:audio:end" });
+      isGenerating = true;
+      try {
+        const generated = await generateMagenta({ prompt, duration });
+        const audioFrames = generated.audio.byteLength / Float32Array.BYTES_PER_ELEMENT / CHANNELS;
+        sendJson(socket, {
+          type: "magenta:audio:start",
+          frames: audioFrames,
+          sampleRate: SAMPLE_RATE,
+          channels: CHANNELS,
+          mode: "magenta",
+          model: MODEL
+        });
+        socket.send(generated.audio);
+        sendJson(socket, {
+          type: "magenta:audio:end",
+          logs: generated.logs
+        });
+      } catch (error) {
+        sendJson(socket, {
+          type: "error",
+          message: error instanceof Error ? error.message : String(error)
+        });
+      } finally {
+        isGenerating = false;
+      }
       return;
     }
 
@@ -114,5 +202,4 @@ server.on("connection", (socket) => {
   });
 });
 
-console.log(`Magenta bridge listening on ws://localhost:${PORT}`);
-
+console.log(`Magenta bridge listening on ws://localhost:${PORT} (${MODEL})`);
