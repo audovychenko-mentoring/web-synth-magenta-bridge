@@ -14,6 +14,7 @@ const DEFAULT_PROMPT =
 const DEFAULT_DURATION = Number(process.env.MAGENTA_DURATION || 4);
 const MAX_DURATION = Number(process.env.MAGENTA_MAX_DURATION || 20);
 const MAGENTA_FRAME_RATE = 25;
+const LIVE_CHUNK_SECONDS = Number(process.env.MAGENTA_LIVE_CHUNK_SECONDS || 1);
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "../../..");
 const pythonBin = resolve(repoRoot, ".venv/bin/python");
@@ -33,6 +34,10 @@ function sendJson(socket, payload) {
   if (socket.readyState === socket.OPEN) {
     socket.send(JSON.stringify(payload));
   }
+}
+
+function delay(ms) {
+  return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
 }
 
 function plantPrompt(level) {
@@ -162,6 +167,11 @@ server.on("connection", (socket) => {
   let packetCount = 0;
   let lastLevel = 0;
   let isGenerating = false;
+  let live = {
+    running: false,
+    prompt: "",
+    startedAt: 0
+  };
 
   sendJson(socket, {
     type: "bridge:ready",
@@ -207,6 +217,69 @@ server.on("connection", (socket) => {
       packetCount = 0;
       lastLevel = 0;
       sendJson(socket, { type: "capture:cleared" });
+      return;
+    }
+
+    if (message.type === "magenta:stream:stop") {
+      live.running = false;
+      sendJson(socket, { type: "magenta:live:stop" });
+      return;
+    }
+
+    if (message.type === "magenta:stream:start") {
+      if (live.running) {
+        sendJson(socket, { type: "magenta:live:already-running" });
+        return;
+      }
+      if (isGenerating) {
+        sendJson(socket, { type: "error", message: "Magenta is already generating" });
+        return;
+      }
+
+      live = {
+        running: true,
+        prompt: typeof message.prompt === "string" ? message.prompt.trim() : "",
+        startedAt: Date.now()
+      };
+
+      sendJson(socket, {
+        type: "magenta:live:start",
+        mode: "magenta",
+        model: MODEL,
+        chunkSeconds: LIVE_CHUNK_SECONDS
+      });
+
+      isGenerating = true;
+      try {
+        while (live.running && socket.readyState === socket.OPEN) {
+          const started = Date.now();
+          const frames = capture.length / CHANNELS;
+          const prompt = live.prompt || plantPrompt(lastLevel || rms(capture));
+
+          sendJson(socket, {
+            type: "magenta:live:chunk",
+            frames,
+            seconds: frames / SAMPLE_RATE,
+            prompt,
+            duration: LIVE_CHUNK_SECONDS,
+            model: MODEL
+          });
+
+          await streamMagenta(socket, { prompt, duration: LIVE_CHUNK_SECONDS });
+
+          const elapsed = Date.now() - started;
+          await delay(Math.max(0, LIVE_CHUNK_SECONDS * 1000 - elapsed));
+        }
+      } catch (error) {
+        sendJson(socket, {
+          type: "error",
+          message: error instanceof Error ? error.message : String(error)
+        });
+      } finally {
+        live.running = false;
+        isGenerating = false;
+        sendJson(socket, { type: "magenta:live:stop" });
+      }
       return;
     }
 

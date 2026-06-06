@@ -36,11 +36,13 @@ function App() {
   const captureRef = useRef<AudioWorkletNode | null>(null);
   const playerRef = useRef<AudioWorkletNode | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
+  const connectPromiseRef = useRef<Promise<WebSocket> | null>(null);
   const runningRef = useRef<Map<VoiceId, RunningVoice>>(new Map());
 
   const [audioReady, setAudioReady] = useState(false);
   const [connected, setConnected] = useState(false);
   const [capturing, setCapturing] = useState(false);
+  const [live, setLive] = useState(false);
   const [activeVoices, setActiveVoices] = useState<Record<VoiceId, boolean>>({
     bass: false,
     pad: false,
@@ -50,7 +52,7 @@ function App() {
   const [level, setLevel] = useState(0);
   const [capturedFrames, setCapturedFrames] = useState(0);
   const [duration, setDuration] = useState(8);
-  const [status, setStatus] = useState("Start audio, connect the bridge, then generate with Magenta.");
+  const [status, setStatus] = useState("Start audio to begin the live Magenta stream.");
 
   const activeCount = useMemo(
     () => Object.values(activeVoices).filter(Boolean).length,
@@ -61,7 +63,6 @@ function App() {
     if (audioRef.current) {
       await audioRef.current.resume();
       setAudioReady(true);
-      setStatus("Audio engine ready. Start a voice or route plant synth audio, then generate.");
       return audioRef.current;
     }
 
@@ -100,11 +101,12 @@ function App() {
     captureRef.current = capture;
     playerRef.current = player;
     setAudioReady(true);
-    setStatus("Audio engine ready. Start a voice or route plant synth audio, then generate.");
+    setStatus("Audio engine ready.");
     return context;
   }
 
   const captureEnabledRef = useRef(false);
+  const liveRef = useRef(false);
 
   async function toggleVoice(voice: Voice) {
     const context = await ensureAudio();
@@ -134,22 +136,37 @@ function App() {
     gain.gain.setTargetAtTime(voice.gain, context.currentTime, voice.id === "pad" ? 0.4 : 0.04);
     runningRef.current.set(voice.id, { oscillator, gain });
     setActiveVoices((state) => ({ ...state, [voice.id]: true }));
-    setStatus(`${voice.label} running. Generate will ask Magenta for real model audio.`);
+    setStatus(`${voice.label} running. Live Magenta is listening to the synth signal.`);
   }
 
   function connectBridge() {
-    if (socketRef.current?.readyState === WebSocket.OPEN) return;
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      return Promise.resolve(socketRef.current);
+    }
+    if (connectPromiseRef.current) return connectPromiseRef.current;
+
     const socket = new WebSocket("ws://localhost:8787");
     socket.binaryType = "arraybuffer";
-    socket.onopen = () => {
-      setConnected(true);
-      setStatus("Bridge connected.");
-    };
+    const promise = new Promise<WebSocket>((resolve, reject) => {
+      socket.onopen = () => {
+        setConnected(true);
+        setStatus("Bridge connected.");
+        connectPromiseRef.current = null;
+        resolve(socket);
+      };
+      socket.onerror = () => {
+        setStatus("Bridge connection failed. Is npm run dev running?");
+        connectPromiseRef.current = null;
+        reject(new Error("Bridge connection failed"));
+      };
+    });
     socket.onclose = () => {
       setConnected(false);
+      liveRef.current = false;
+      setLive(false);
       setStatus("Bridge disconnected.");
+      connectPromiseRef.current = null;
     };
-    socket.onerror = () => setStatus("Bridge connection failed. Is npm run dev running?");
     socket.onmessage = (event) => {
       if (typeof event.data === "string") {
         const message = JSON.parse(event.data);
@@ -162,6 +179,16 @@ function App() {
           setStatus(`Receiving ${message.model} audio from Magenta.`);
         } else if (message.type === "magenta:audio:end") {
           setStatus("Real Magenta audio received.");
+        } else if (message.type === "magenta:live:start") {
+          liveRef.current = true;
+          setLive(true);
+          setStatus(`Live stream running with ${message.model}.`);
+        } else if (message.type === "magenta:live:chunk") {
+          setStatus(`Live Magenta stream: "${message.prompt}"`);
+        } else if (message.type === "magenta:live:stop") {
+          liveRef.current = false;
+          setLive(false);
+          setStatus("Live stream stopped.");
         } else if (message.type === "bridge:ready") {
           setStatus(`Bridge ready in ${message.mode} mode (${message.model}).`);
         } else if (message.type === "error") {
@@ -173,6 +200,8 @@ function App() {
       playerRef.current?.port.postMessage(audio, [audio.buffer]);
     };
     socketRef.current = socket;
+    connectPromiseRef.current = promise;
+    return promise;
   }
 
   function clearCapture() {
@@ -195,6 +224,30 @@ function App() {
     socketRef.current?.send(JSON.stringify({ type: "magenta:generate", duration }));
   }
 
+  async function toggleLiveStream() {
+    if (liveRef.current) {
+      liveRef.current = false;
+      setLive(false);
+      socketRef.current?.send(JSON.stringify({ type: "magenta:stream:stop" }));
+      setStatus("Stopping live stream.");
+      return;
+    }
+
+    try {
+      await ensureAudio();
+      const socket = await connectBridge();
+      captureEnabledRef.current = true;
+      setCapturing(true);
+      liveRef.current = true;
+      setLive(true);
+      setStatus("Starting live Magenta stream.");
+      socket.send(JSON.stringify({ type: "magenta:stream:start" }));
+    } catch {
+      liveRef.current = false;
+      setLive(false);
+    }
+  }
+
   return (
     <main className="shell">
       <section className="topbar">
@@ -209,15 +262,18 @@ function App() {
           <span className={connected ? "pill on" : "pill"}>
             <Cable size={14} /> Bridge
           </span>
+          <span className={live ? "pill on" : "pill"}>
+            <Radio size={14} /> Live
+          </span>
         </div>
       </section>
 
       <section className="transport">
-        <button className={audioReady ? "active" : ""} onClick={ensureAudio}>
-          {audioReady ? <Check size={18} /> : <Play size={18} />}
-          {audioReady ? "Audio Ready" : "Start Audio"}
+        <button className={live ? "active" : ""} onClick={toggleLiveStream}>
+          {live ? <Square size={18} /> : audioReady ? <Check size={18} /> : <Play size={18} />}
+          {live ? "Stop Live" : "Start Audio"}
         </button>
-        <button onClick={connectBridge}>
+        <button onClick={() => void connectBridge().catch(() => undefined)}>
           <Radio size={18} /> Connect
         </button>
         <button className={capturing ? "active" : ""} onClick={toggleCapture}>
@@ -235,8 +291,8 @@ function App() {
             </button>
           ))}
         </div>
-        <button onClick={continueWithMagenta} disabled={!connected}>
-          <Sparkles size={18} /> Generate
+        <button onClick={continueWithMagenta} disabled={!connected || live}>
+          <Sparkles size={18} /> Generate Clip
         </button>
         <button className="ghost" onClick={clearCapture}>
           <RotateCcw size={18} /> Clear
