@@ -7,6 +7,13 @@ class StreamPlayerProcessor extends AudioWorkletProcessor {
     this.started = false;
     this.prebufferSamples = 48000;
     this.port.onmessage = (event) => {
+      if (event.data?.type === "reset") {
+        this.queue = [];
+        this.readIndex = 0;
+        this.bufferedSamples = 0;
+        this.started = false;
+        return;
+      }
       if (event.data instanceof Float32Array) {
         this.queue.push(event.data);
         this.bufferedSamples += event.data.length;

@@ -187,6 +187,7 @@ function App() {
       input.onmidimessage = null;
     });
     midiInputRef.current = null;
+    captureEnabledRef.current = false;
     midiVoicesRef.current.forEach(({ oscillator, gain }) => {
       const context = audioRef.current;
       if (!context) return;
@@ -357,14 +358,31 @@ function App() {
   }
 
   function stopLiveStream() {
-    if (!liveRef.current && !armedRef.current) return;
     const wasLive = liveRef.current;
+    const wasArmed = armedRef.current;
     armedRef.current = false;
     setArmed(false);
     liveRef.current = false;
     setLive(false);
-    socketRef.current?.send(JSON.stringify({ type: "magenta:stream:stop" }));
-    setStatus(wasLive ? "Stopping live stream." : "Waiting cancelled.");
+    captureEnabledRef.current = false;
+    midiAccessRef.current?.inputs.forEach((input) => {
+      input.onmidimessage = null;
+    });
+    midiInputRef.current = null;
+    midiVoicesRef.current.forEach(({ oscillator, gain }) => {
+      const context = audioRef.current;
+      if (!context) return;
+      gain.gain.setTargetAtTime(0, context.currentTime, 0.02);
+      oscillator.stop(context.currentTime + 0.08);
+    });
+    midiVoicesRef.current.clear();
+    playerRef.current?.port.postMessage({ type: "reset" });
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ type: "magenta:stream:stop" }));
+    }
+    setLevel(0);
+    setCapturedFrames(0);
+    setStatus(wasLive ? "Stopping live stream." : wasArmed ? "Waiting cancelled." : "Stopped.");
   }
 
   return (
@@ -386,7 +404,7 @@ function App() {
         >
           <Play size={26} fill="currentColor" />
         </button>
-        <button className="primaryAction stopAction" onClick={stopLiveStream} disabled={!armed && !live}>
+        <button className="primaryAction stopAction" onClick={stopLiveStream}>
           <Square size={18} />
           Stop
         </button>
