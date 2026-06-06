@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Play, Square } from "lucide-react";
 import "./styles.css";
@@ -71,8 +71,12 @@ function midiPermissionMessage(error: unknown, permissionState = "unknown") {
 function App() {
   const audioRef = useRef<AudioContext | null>(null);
   const masterRef = useRef<GainNode | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
   const captureRef = useRef<AudioWorkletNode | null>(null);
   const playerRef = useRef<AudioWorkletNode | null>(null);
+  const spectrogramCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const spectrogramFrameRef = useRef<number | null>(null);
+  const frequencyDataRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const connectPromiseRef = useRef<Promise<WebSocket> | null>(null);
   const midiAccessRef = useRef<MidiAccessLike | null>(null);
@@ -98,6 +102,12 @@ function App() {
   const [lastMidiMessage, setLastMidiMessage] = useState("none");
   const [status, setStatus] = useState("Press Play to listen for TouchMe MIDI.");
 
+  useEffect(() => () => {
+    if (spectrogramFrameRef.current !== null) {
+      window.cancelAnimationFrame(spectrogramFrameRef.current);
+    }
+  }, []);
+
   async function ensureAudio() {
     if (audioRef.current) {
       await audioRef.current.resume();
@@ -111,6 +121,11 @@ function App() {
     const master = context.createGain();
     master.gain.value = 0.45;
     master.connect(context.destination);
+
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 1024;
+    analyser.smoothingTimeConstant = 0.72;
+    master.connect(analyser);
 
     const capture = new AudioWorkletNode(context, "capture-processor", {
       numberOfInputs: 1,
@@ -136,8 +151,11 @@ function App() {
 
     audioRef.current = context;
     masterRef.current = master;
+    analyserRef.current = analyser;
+    frequencyDataRef.current = new Uint8Array(analyser.frequencyBinCount);
     captureRef.current = capture;
     playerRef.current = player;
+    startSpectrogramLoop();
     setStatus("Audio engine ready.");
     return context;
   }
@@ -145,6 +163,58 @@ function App() {
   const captureEnabledRef = useRef(false);
   const armedRef = useRef(false);
   const liveRef = useRef(false);
+
+  function startSpectrogramLoop() {
+    if (spectrogramFrameRef.current !== null) return;
+
+    const draw = () => {
+      const canvas = spectrogramCanvasRef.current;
+      const analyser = analyserRef.current;
+      const data = frequencyDataRef.current;
+      if (canvas && analyser && data) {
+        const ratio = window.devicePixelRatio || 1;
+        const width = Math.max(1, Math.floor(canvas.clientWidth * ratio));
+        const height = Math.max(1, Math.floor(canvas.clientHeight * ratio));
+        if (canvas.width !== width || canvas.height !== height) {
+          canvas.width = width;
+          canvas.height = height;
+          resetSpectrogram();
+        }
+
+        const context = canvas.getContext("2d");
+        if (context) {
+          analyser.getByteFrequencyData(data);
+          context.drawImage(canvas, -2, 0);
+          context.fillStyle = "#111";
+          context.fillRect(width - 2, 0, 2, height);
+
+          for (let y = 0; y < height; y += 1) {
+            const normalizedY = 1 - y / Math.max(1, height - 1);
+            const bin = Math.min(data.length - 1, Math.floor(normalizedY ** 2.2 * (data.length - 1)));
+            const value = data[bin] / 255;
+            if (value < 0.025) continue;
+            const intensity = Math.min(1, value * 1.45);
+            const red = Math.floor(20 + intensity * 225);
+            const green = Math.floor(40 + intensity * 180);
+            const blue = Math.floor(70 + (1 - intensity) * 70);
+            context.fillStyle = `rgb(${red}, ${green}, ${blue})`;
+            context.fillRect(width - 2, y, 2, 1);
+          }
+        }
+      }
+      spectrogramFrameRef.current = window.requestAnimationFrame(draw);
+    };
+
+    spectrogramFrameRef.current = window.requestAnimationFrame(draw);
+  }
+
+  function resetSpectrogram() {
+    const canvas = spectrogramCanvasRef.current;
+    const context = canvas?.getContext("2d");
+    if (!canvas || !context) return;
+    context.fillStyle = "#111";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+  }
 
   function syncMidiInputs(access = midiAccessRef.current) {
     if (!access) return;
@@ -608,6 +678,7 @@ function App() {
     }
     setLevel(0);
     setCapturedFrames(0);
+    resetSpectrogram();
     midiMessageCountRef.current = 0;
     setMidiMessageCount(0);
     setLastMidiMessage("none");
@@ -653,6 +724,10 @@ function App() {
           </div>
           <div className="meter">
             <span style={{ transform: `scaleX(${Math.min(1, level * 12)})` }} />
+          </div>
+          <div className="spectrogramPanel">
+            <span className="label">Spectrogram</span>
+            <canvas ref={spectrogramCanvasRef} className="spectrogramCanvas" aria-label="Input spectrogram" />
           </div>
           <div>
             <span className="label">Ports</span>

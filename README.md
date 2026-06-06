@@ -41,6 +41,8 @@ Play calibrates the TouchMe baseline for about one second. Keep hands still duri
 
 Small plant deviations are amplified after calibration so subtle leaf/soil changes can still become musical movement.
 
+The spectrogram visualizes the same synthesized plant input that is captured for Magenta, scrolling left over time with low frequencies at the bottom and higher frequencies at the top.
+
 ## Magenta Setup
 
 The bridge expects Magenta RT to be installed in `.venv` and the model assets to exist under `~/Documents/Magenta/magenta-rt-v2/`:
