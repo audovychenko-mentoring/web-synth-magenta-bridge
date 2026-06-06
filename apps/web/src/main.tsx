@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Cable, Check, Circle, Play, Radio, RotateCcw, Sparkles, Square } from "lucide-react";
+import { Cable, Check, Circle, Mic, Play, Radio, RotateCcw, Sparkles, Square } from "lucide-react";
 import "./styles.css";
 
 type VoiceId = "bass" | "pad" | "pluck" | "drone";
@@ -35,6 +35,8 @@ function App() {
   const masterRef = useRef<GainNode | null>(null);
   const captureRef = useRef<AudioWorkletNode | null>(null);
   const playerRef = useRef<AudioWorkletNode | null>(null);
+  const inputSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const inputStreamRef = useRef<MediaStream | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const connectPromiseRef = useRef<Promise<WebSocket> | null>(null);
   const runningRef = useRef<Map<VoiceId, RunningVoice>>(new Map());
@@ -42,6 +44,9 @@ function App() {
   const [audioReady, setAudioReady] = useState(false);
   const [connected, setConnected] = useState(false);
   const [capturing, setCapturing] = useState(false);
+  const [plantConnected, setPlantConnected] = useState(false);
+  const [inputDevices, setInputDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedInputId, setSelectedInputId] = useState("");
   const [live, setLive] = useState(false);
   const [activeVoices, setActiveVoices] = useState<Record<VoiceId, boolean>>({
     bass: false,
@@ -107,6 +112,65 @@ function App() {
 
   const captureEnabledRef = useRef(false);
   const liveRef = useRef(false);
+
+  async function refreshInputDevices() {
+    if (!navigator.mediaDevices?.enumerateDevices) return;
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const audioInputs = devices.filter((device) => device.kind === "audioinput");
+    setInputDevices(audioInputs);
+    if (!selectedInputId && audioInputs[0]?.deviceId) {
+      setSelectedInputId(audioInputs[0].deviceId);
+    }
+  }
+
+  async function connectPlantInput(deviceId = selectedInputId) {
+    const context = await ensureAudio();
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setStatus("This browser cannot open an audio input.");
+      return false;
+    }
+
+    inputSourceRef.current?.disconnect();
+    inputStreamRef.current?.getTracks().forEach((track) => track.stop());
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        deviceId: deviceId ? { exact: deviceId } : undefined,
+        channelCount: 2,
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false
+      }
+    });
+    const source = context.createMediaStreamSource(stream);
+    source.connect(captureRef.current!);
+
+    inputSourceRef.current = source;
+    inputStreamRef.current = stream;
+    captureEnabledRef.current = true;
+    setCapturing(true);
+    setPlantConnected(true);
+    await refreshInputDevices();
+    const label = stream.getAudioTracks()[0]?.label || "plant audio input";
+    setStatus(`Plant input connected: ${label}.`);
+    return true;
+  }
+
+  function disconnectPlantInput() {
+    inputSourceRef.current?.disconnect();
+    inputSourceRef.current = null;
+    inputStreamRef.current?.getTracks().forEach((track) => track.stop());
+    inputStreamRef.current = null;
+    setPlantConnected(false);
+    setStatus("Plant input disconnected.");
+  }
+
+  async function changePlantInput(deviceId: string) {
+    setSelectedInputId(deviceId);
+    if (plantConnected) {
+      await connectPlantInput(deviceId);
+    }
+  }
 
   async function toggleVoice(voice: Voice) {
     const context = await ensureAudio();
@@ -235,9 +299,11 @@ function App() {
 
     try {
       await ensureAudio();
+      if (!plantConnected) {
+        const inputReady = await connectPlantInput();
+        if (!inputReady) return;
+      }
       const socket = await connectBridge();
-      captureEnabledRef.current = true;
-      setCapturing(true);
       liveRef.current = true;
       setLive(true);
       setStatus("Starting live Magenta stream.");
@@ -245,6 +311,7 @@ function App() {
     } catch {
       liveRef.current = false;
       setLive(false);
+      setStatus("Plant input was not opened. Check the browser permission and selected input.");
     }
   }
 
@@ -262,6 +329,9 @@ function App() {
           <span className={connected ? "pill on" : "pill"}>
             <Cable size={14} /> Bridge
           </span>
+          <span className={plantConnected ? "pill on" : "pill"}>
+            <Mic size={14} /> Plant
+          </span>
           <span className={live ? "pill on" : "pill"}>
             <Radio size={14} /> Live
           </span>
@@ -276,6 +346,35 @@ function App() {
         <button onClick={() => void connectBridge().catch(() => undefined)}>
           <Radio size={18} /> Connect
         </button>
+        <button
+          className={plantConnected ? "active" : ""}
+          onClick={() => {
+            if (plantConnected) {
+              disconnectPlantInput();
+            } else {
+              void connectPlantInput().catch(() => {
+                setStatus("Plant input was not opened. Check the browser permission and selected input.");
+              });
+            }
+          }}
+        >
+          {plantConnected ? <Check size={18} /> : <Mic size={18} />} Plant Input
+        </button>
+        <select
+          aria-label="Plant audio input"
+          className="inputSelect"
+          value={selectedInputId}
+          onChange={(event) => void changePlantInput(event.target.value)}
+          onFocus={() => void refreshInputDevices()}
+        >
+          {inputDevices.length === 0 ? (
+            <option value="">Default input</option>
+          ) : inputDevices.map((device, index) => (
+            <option key={device.deviceId} value={device.deviceId}>
+              {device.label || `Input ${index + 1}`}
+            </option>
+          ))}
+        </select>
         <button className={capturing ? "active" : ""} onClick={toggleCapture}>
           {capturing ? <Square size={18} /> : <Circle size={18} />} Meter
         </button>

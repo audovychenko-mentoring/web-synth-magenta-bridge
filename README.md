@@ -20,11 +20,12 @@ Open the web app at `http://localhost:5173` and keep the bridge running at `ws:/
 In the browser:
 
 1. Click `Start Audio`.
-2. Wait for the `Live` pill to turn on.
-3. Turn on synth voices or route the plant synth signal into the web synth collection.
-4. Click `Stop Live` to stop the continuous stream.
+2. Allow microphone/audio-input access when the browser asks.
+3. Pick the plant interface from the `Plant audio input` menu if it is not already selected.
+4. Wait for the `Plant` and `Live` pills to turn on.
+5. Click `Stop Live` to stop the continuous stream.
 
-`Start Audio` opens the browser audio engine, connects the local bridge, turns on metering from the synth signal, and starts a paced Magenta stream. The first generation loads and warms up the model, so it can take a few seconds. After that, the worker stays alive and streams 40 ms Magenta frames to the browser as they are generated.
+`Start Audio` opens the browser audio engine, connects the local bridge, opens the plant audio input, turns on metering, and starts a paced Magenta stream. The first generation loads and warms up the model, so it can take a few seconds. After that, the worker stays alive and streams 40 ms Magenta frames to the browser as they are generated.
 
 `Generate Clip` is still available for one-off finite clips. Choose `4s`, `8s`, `12s`, or `20s`, then click `Generate Clip`.
 

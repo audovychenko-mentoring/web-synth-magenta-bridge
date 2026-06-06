@@ -37,6 +37,18 @@ button:disabled {
   cursor: not-allowed;
 }
 
+select {
+  min-height: 44px;
+  border: 1px solid #1d1d1d;
+  border-radius: 8px;
+  background: #fffaf2;
+  color: #141414;
+  box-shadow: 0 2px 0 #1d1d1d;
+  font: inherit;
+  font-weight: 700;
+  padding: 0 34px 0 12px;
+}
+
 .shell {
   min-height: 100vh;
   padding: clamp(18px, 4vw, 40px);
@@ -99,6 +111,10 @@ p {
 
 .transport .ghost {
   background: transparent;
+}
+
+.inputSelect {
+  max-width: min(360px, 100%);
 }
 
 .durationControl {
