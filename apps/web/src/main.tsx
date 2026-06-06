@@ -101,6 +101,11 @@ function App() {
   const [midiPortNames, setMidiPortNames] = useState("none");
   const [midiMessageCount, setMidiMessageCount] = useState(0);
   const [lastMidiMessage, setLastMidiMessage] = useState("none");
+  const [lastMidiRaw, setLastMidiRaw] = useState("none");
+  const [midiInputValue, setMidiInputValue] = useState(0);
+  const [midiBaselineDelta, setMidiBaselineDelta] = useState(0);
+  const [midiPlantAmount, setMidiPlantAmount] = useState(0);
+  const [midiInputState, setMidiInputState] = useState("idle");
   const [status, setStatus] = useState("Press Play to listen for TouchMe MIDI.");
 
   useEffect(() => () => {
@@ -332,6 +337,11 @@ function App() {
     midiMessageCountRef.current = 0;
     setMidiMessageCount(0);
     setLastMidiMessage("none");
+    setLastMidiRaw("none");
+    setMidiInputValue(0);
+    setMidiBaselineDelta(0);
+    setMidiPlantAmount(0);
+    setMidiInputState("listening");
     midiBaselineRef.current.clear();
     midiCalibratingUntilRef.current = 0;
     captureEnabledRef.current = true;
@@ -350,6 +360,11 @@ function App() {
     midiMessageCountRef.current = 0;
     setMidiMessageCount(0);
     setLastMidiMessage("none");
+    setLastMidiRaw("none");
+    setMidiInputValue(0);
+    setMidiBaselineDelta(0);
+    setMidiPlantAmount(0);
+    setMidiInputState("idle");
     midiBaselineRef.current.clear();
     midiCalibratingUntilRef.current = 0;
     captureEnabledRef.current = false;
@@ -379,9 +394,14 @@ function App() {
     midiMessageCountRef.current += 1;
     setMidiMessageCount(midiMessageCountRef.current);
     setLastMidiMessage(messageText);
+    setLastMidiRaw(Array.from(event.data).join(" "));
+    setMidiInputValue(amount);
 
     if (now < midiCalibratingUntilRef.current) {
       midiBaselineRef.current.set(messageKey, amount);
+      setMidiBaselineDelta(0);
+      setMidiPlantAmount(0);
+      setMidiInputState("calibrating");
       releasePlantSignal();
       return;
     }
@@ -391,6 +411,9 @@ function App() {
     const baseline = midiBaselineRef.current.get(messageKey) ?? amount;
     if (!hasBaseline && !isNoteOn) {
       midiBaselineRef.current.set(messageKey, amount);
+      setMidiBaselineDelta(0);
+      setMidiPlantAmount(0);
+      setMidiInputState("baseline");
       releasePlantSignal();
       return;
     }
@@ -398,6 +421,9 @@ function App() {
     const amplifiedChange = Math.min(1, Math.pow(Math.max(0, baselineDelta - PLANT_CHANGE_THRESHOLD / 2) * PLANT_CHANGE_GAIN, 0.72));
     const changedAmount = Math.max(amplifiedChange, isNoteOn ? amount : 0);
     const hasPlantChange = isNoteOn || baselineDelta > PLANT_CHANGE_THRESHOLD;
+    setMidiBaselineDelta(baselineDelta);
+    setMidiPlantAmount(changedAmount);
+    setMidiInputState(hasPlantChange ? "plant change" : "baseline");
     if (hasPlantChange && armedRef.current && now - lastMidiStatusAtRef.current > 250) {
       setStatus(`TouchMe plant change: ${messageText}.`);
       lastMidiStatusAtRef.current = now;
@@ -684,6 +710,11 @@ function App() {
     midiMessageCountRef.current = 0;
     setMidiMessageCount(0);
     setLastMidiMessage("none");
+    setLastMidiRaw("none");
+    setMidiInputValue(0);
+    setMidiBaselineDelta(0);
+    setMidiPlantAmount(0);
+    setMidiInputState("idle");
     midiBaselineRef.current.clear();
     midiCalibratingUntilRef.current = 0;
     setStatus(wasLive ? "Stopping live stream." : wasArmed ? "Waiting cancelled. Press Play to listen again." : "Stopped. Press Play to listen again.");
@@ -742,6 +773,28 @@ function App() {
           <div>
             <span className="label">Last MIDI</span>
             <strong className="debugValue">{lastMidiMessage}</strong>
+          </div>
+          <div>
+            <span className="label">Raw MIDI</span>
+            <strong className="debugValue">{lastMidiRaw}</strong>
+          </div>
+          <div>
+            <span className="label">MIDI Value</span>
+            <strong>{midiInputValue.toFixed(4)}</strong>
+          </div>
+          <div className="miniMeter">
+            <span style={{ transform: `scaleX(${Math.min(1, midiInputValue)})` }} />
+          </div>
+          <div>
+            <span className="label">Delta</span>
+            <strong>{midiBaselineDelta.toFixed(4)}</strong>
+          </div>
+          <div className="miniMeter changeMeter">
+            <span style={{ transform: `scaleX(${Math.min(1, midiPlantAmount)})` }} />
+          </div>
+          <div>
+            <span className="label">MIDI State</span>
+            <strong className="debugValue">{midiInputState}</strong>
           </div>
         </div>
       </section>

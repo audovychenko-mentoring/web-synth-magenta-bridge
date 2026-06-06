@@ -37,6 +37,8 @@ If the app says it is waiting for TouchMe MIDI signal, it has opened the MIDI de
 
 The MIDI monitor shows `PORTS`, `MESSAGES`, and `LAST MIDI`. After pressing Play, `MESSAGES` should increase when you touch TouchMe. If it stays `0`, the browser sees the ports but no MIDI bytes are arriving.
 
+The MIDI input readout also shows raw MIDI bytes, normalized value, baseline delta, boosted plant amount, and whether the event is still baseline or an active plant change.
+
 Play calibrates the TouchMe baseline for about one second. Keep hands still during calibration; after that, the app starts Magenta only when TouchMe values change from the baseline.
 
 Small plant deviations are strongly amplified after calibration so subtle leaf/soil changes can still become musical movement.
