@@ -82,6 +82,9 @@ function App() {
   const lastMidiStatusAtRef = useRef(0);
   const midiMessageCountRef = useRef(0);
   const midiNoSignalTimerRef = useRef<number | null>(null);
+  const midiCalibrationTimerRef = useRef<number | null>(null);
+  const midiBaselineRef = useRef<Map<string, number>>(new Map());
+  const midiCalibratingUntilRef = useRef(0);
 
   const [armed, setArmed] = useState(false);
   const [live, setLive] = useState(false);
@@ -170,6 +173,12 @@ function App() {
     midiNoSignalTimerRef.current = null;
   }
 
+  function clearCalibrationTimer() {
+    if (midiCalibrationTimerRef.current === null) return;
+    window.clearTimeout(midiCalibrationTimerRef.current);
+    midiCalibrationTimerRef.current = null;
+  }
+
   function midiMessageText(data: Uint8Array) {
     const [statusByte, data1 = 0, data2 = 0] = data;
     const command = statusByte & 0xf0;
@@ -193,6 +202,14 @@ function App() {
     if (command === 0xa0) return data2 / 127;
     if (command === 0xe0) return Math.abs(((data2 << 7) + data1) - 8192) / 8192;
     return Math.max(data1, data2) / 127;
+  }
+
+  function midiMessageKey(data: Uint8Array) {
+    const [statusByte, data1 = 0] = data;
+    const command = statusByte & 0xf0;
+    if (command === 0xe0) return `${command}:bend`;
+    if (command === 0xd0) return `${command}:pressure`;
+    return `${command}:${data1}`;
   }
 
   async function ensureMidiAccess() {
@@ -241,12 +258,16 @@ function App() {
     midiMessageCountRef.current = 0;
     setMidiMessageCount(0);
     setLastMidiMessage("none");
+    midiBaselineRef.current.clear();
+    midiCalibratingUntilRef.current = 0;
     captureEnabledRef.current = true;
     if (!quiet) setStatus(`TouchMe MIDI connected: ${midiInputNames(touchMeInputs)}.`);
     return true;
   }
 
   function disconnectTouchMeMidi() {
+    clearNoSignalTimer();
+    clearCalibrationTimer();
     midiAccessRef.current?.inputs.forEach((input) => {
       input.onmidimessage = null;
     });
@@ -255,6 +276,8 @@ function App() {
     midiMessageCountRef.current = 0;
     setMidiMessageCount(0);
     setLastMidiMessage("none");
+    midiBaselineRef.current.clear();
+    midiCalibratingUntilRef.current = 0;
     captureEnabledRef.current = false;
     midiVoicesRef.current.forEach(({ oscillator, gain }) => {
       const context = audioRef.current;
@@ -269,24 +292,44 @@ function App() {
 
   function handleMidiMessage(event: { data: Uint8Array }) {
     const [statusByte, data1 = 0, data2 = 0] = event.data;
+    if (statusByte >= 0xf8) return;
+
     const command = statusByte & 0xf0;
     const note = data1;
     const velocity = data2 / 127;
     const amount = midiSignalAmount(event.data);
     const now = performance.now();
     const messageText = midiMessageText(event.data);
+    const messageKey = midiMessageKey(event.data);
 
-    clearNoSignalTimer();
     midiMessageCountRef.current += 1;
     setMidiMessageCount(midiMessageCountRef.current);
     setLastMidiMessage(messageText);
 
-    if (armedRef.current && now - lastMidiStatusAtRef.current > 250) {
-      setStatus(`TouchMe MIDI received: ${messageText}.`);
+    if (now < midiCalibratingUntilRef.current) {
+      midiBaselineRef.current.set(messageKey, amount);
+      releasePlantSignal();
+      return;
+    }
+
+    const isNoteOn = command === 0x90 && data2 > 0;
+    const hasBaseline = midiBaselineRef.current.has(messageKey);
+    const baseline = midiBaselineRef.current.get(messageKey) ?? amount;
+    if (!hasBaseline && !isNoteOn) {
+      midiBaselineRef.current.set(messageKey, amount);
+      releasePlantSignal();
+      return;
+    }
+    const baselineDelta = Math.abs(amount - baseline);
+    const changedAmount = Math.min(1, Math.max(baselineDelta * 5, isNoteOn ? amount : 0));
+    const hasPlantChange = isNoteOn || baselineDelta > 0.035;
+    if (hasPlantChange && armedRef.current && now - lastMidiStatusAtRef.current > 250) {
+      setStatus(`TouchMe plant change: ${messageText}.`);
       lastMidiStatusAtRef.current = now;
     }
 
-    if (command === 0x90 && data2 > 0) {
+    if (isNoteOn) {
+      clearNoSignalTimer();
       startMidiVoice(note, velocity);
       void startStreamFromMidiSignal();
       return;
@@ -297,16 +340,18 @@ function App() {
     }
     if (command === 0xb0) {
       updateMidiControl(data1, velocity);
-      if (data2 > 0) {
-        drivePlantSignal(event.data, amount);
+      if (hasPlantChange) {
+        clearNoSignalTimer();
+        drivePlantSignal(event.data, changedAmount);
         void startStreamFromMidiSignal();
       } else {
         releasePlantSignal();
       }
       return;
     }
-    if (amount > 0.01) {
-      drivePlantSignal(event.data, amount);
+    if (hasPlantChange) {
+      clearNoSignalTimer();
+      drivePlantSignal(event.data, changedAmount);
       void startStreamFromMidiSignal();
     } else {
       releasePlantSignal();
@@ -508,12 +553,21 @@ function App() {
       if (!inputReady) return;
       armedRef.current = true;
       setArmed(true);
-      setStatus(`Waiting for TouchMe MIDI signal from ${midiInputNames() || "MIDI input"}.`);
+      midiBaselineRef.current.clear();
+      midiCalibratingUntilRef.current = performance.now() + 900;
+      setStatus(`Calibrating TouchMe baseline from ${midiInputNames() || "MIDI input"}. Keep hands still.`);
+      clearCalibrationTimer();
+      midiCalibrationTimerRef.current = window.setTimeout(() => {
+        if (!armedRef.current || liveRef.current) return;
+        setStatus(`Listening for plant changes from ${midiInputNames() || "MIDI input"}.`);
+      }, 950);
       clearNoSignalTimer();
       midiNoSignalTimerRef.current = window.setTimeout(() => {
-        if (!armedRef.current || midiMessageCountRef.current > 0) return;
-        setStatus(`Listening on ${midiInputNames() || "MIDI input"}, but no MIDI messages received yet.`);
-      }, 3500);
+        if (!armedRef.current || liveRef.current) return;
+        setStatus(midiMessageCountRef.current === 0
+          ? `Listening on ${midiInputNames() || "MIDI input"}, but no MIDI messages received yet.`
+          : `MIDI baseline is present. Touch or move the plant to create a change.`);
+      }, 4500);
     } catch (error) {
       armedRef.current = false;
       setArmed(false);
@@ -525,6 +579,7 @@ function App() {
     const wasLive = liveRef.current;
     const wasArmed = armedRef.current;
     clearNoSignalTimer();
+    clearCalibrationTimer();
     armedRef.current = false;
     setArmed(false);
     liveRef.current = false;
@@ -552,6 +607,8 @@ function App() {
     midiMessageCountRef.current = 0;
     setMidiMessageCount(0);
     setLastMidiMessage("none");
+    midiBaselineRef.current.clear();
+    midiCalibratingUntilRef.current = 0;
     setStatus(wasLive ? "Stopping live stream." : wasArmed ? "Waiting cancelled. Press Play to listen again." : "Stopped. Press Play to listen again.");
   }
 

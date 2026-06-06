@@ -37,6 +37,8 @@ If the app says it is waiting for TouchMe MIDI signal, it has opened the MIDI de
 
 The MIDI monitor shows `PORTS`, `MESSAGES`, and `LAST MIDI`. After pressing Play, `MESSAGES` should increase when you touch TouchMe. If it stays `0`, the browser sees the ports but no MIDI bytes are arriving.
 
+Play calibrates the TouchMe baseline for about one second. Keep hands still during calibration; after that, the app starts Magenta only when TouchMe values change from the baseline.
+
 ## Magenta Setup
 
 The bridge expects Magenta RT to be installed in `.venv` and the model assets to exist under `~/Documents/Magenta/magenta-rt-v2/`:
