@@ -45,6 +45,8 @@ Small plant deviations are strongly amplified after calibration so subtle leaf/s
 
 The spectrogram visualizes the same synthesized plant input that is captured for Magenta, scrolling left over time with low frequencies at the bottom and higher frequencies at the top.
 
+The web app sends plant-pattern metadata to the bridge, and the bridge chooses a restrained Magenta prompt that fits sparse, moderate, or active plant movement instead of using one generic prompt for every signal.
+
 ## Magenta Setup
 
 The bridge expects Magenta RT to be installed in `.venv` and the model assets to exist under `~/Documents/Magenta/magenta-rt-v2/`:

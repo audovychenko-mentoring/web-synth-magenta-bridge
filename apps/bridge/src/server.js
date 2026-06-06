@@ -40,14 +40,60 @@ function delay(ms) {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
 }
 
-function plantPrompt(level) {
-  if (level > 0.08) {
-    return `${DEFAULT_PROMPT}, dense and reactive, strong pulsing rhythm`;
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function numberOrZero(value) {
+  return Number.isFinite(Number(value)) ? Number(value) : 0;
+}
+
+function normalizePlantPattern(pattern = {}) {
+  const changeRateHz = clamp(numberOrZero(pattern.changeRateHz), 0, 12);
+  const averageDelta = clamp(numberOrZero(pattern.averageDelta), 0, 1);
+  const maxDelta = clamp(numberOrZero(pattern.maxDelta), 0, 1);
+  const averageAmount = clamp(numberOrZero(pattern.averageAmount), 0, 1);
+  const maxAmount = clamp(numberOrZero(pattern.maxAmount), 0, 1);
+  const messageCount = Math.max(0, Math.round(numberOrZero(pattern.messageCount)));
+  const changeCount = Math.max(0, Math.round(numberOrZero(pattern.changeCount)));
+  const averageIntervalMs = Math.max(0, numberOrZero(pattern.averageIntervalMs));
+  const density = ["sparse", "moderate", "active"].includes(pattern.density)
+    ? pattern.density
+    : changeRateHz > 2.2 ? "active" : changeRateHz > 0.7 ? "moderate" : "sparse";
+
+  return {
+    messageCount,
+    changeCount,
+    changeRateHz,
+    density,
+    averageDelta,
+    maxDelta,
+    averageAmount,
+    maxAmount,
+    averageIntervalMs
+  };
+}
+
+function plantPrompt(level, pattern = {}) {
+  const plant = normalizePlantPattern(pattern);
+  const energy = Math.max(numberOrZero(level) * 6, plant.averageAmount, plant.maxAmount * 0.7);
+  const movement = Math.max(plant.averageDelta * 30, plant.maxDelta * 12, plant.changeRateHz / 3);
+  const base =
+    "restrained ambient electronic track bed, warm tonal pads, soft pulse, minimal percussion, coherent harmony, no harsh noise, leave space for an existing track";
+
+  if (plant.changeCount === 0 && plant.messageCount > 0) {
+    return `${base}, steady plant baseline, very slow evolving drone, subtle texture only`;
   }
-  if (level > 0.025) {
-    return `${DEFAULT_PROMPT}, gently pulsing, organic electronic texture`;
+
+  if (plant.density === "active" || movement > 0.8) {
+    return `${base}, active plant gestures, gentle arpeggiated pulses, rounded plucks, controlled energy, blend smoothly into the groove`;
   }
-  return DEFAULT_PROMPT;
+
+  if (plant.density === "moderate" || energy > 0.28) {
+    return `${base}, moderate plant movement, breathing synth pattern, soft rhythmic shimmer, organic but stable`;
+  }
+
+  return `${base}, sparse plant changes, delicate sustained tones, occasional small melodic responses, calm and musical`;
 }
 
 function workerLogs() {
@@ -170,6 +216,7 @@ server.on("connection", (socket) => {
   let live = {
     running: false,
     prompt: "",
+    plant: {},
     startedAt: 0
   };
 
@@ -226,6 +273,11 @@ server.on("connection", (socket) => {
       return;
     }
 
+    if (message.type === "plant:pattern") {
+      live.plant = normalizePlantPattern(message.plant || {});
+      return;
+    }
+
     if (message.type === "magenta:stream:start") {
       if (live.running) {
         sendJson(socket, { type: "magenta:live:already-running" });
@@ -239,6 +291,7 @@ server.on("connection", (socket) => {
       live = {
         running: true,
         prompt: typeof message.prompt === "string" ? message.prompt.trim() : "",
+        plant: normalizePlantPattern(message.plant || {}),
         startedAt: Date.now()
       };
 
@@ -254,13 +307,14 @@ server.on("connection", (socket) => {
         while (live.running && socket.readyState === socket.OPEN) {
           const started = Date.now();
           const frames = capture.length / CHANNELS;
-          const prompt = live.prompt || plantPrompt(lastLevel || rms(capture));
+          const prompt = live.prompt || plantPrompt(lastLevel || rms(capture), live.plant);
 
           sendJson(socket, {
             type: "magenta:live:chunk",
             frames,
             seconds: frames / SAMPLE_RATE,
             prompt,
+            plant: live.plant,
             duration: LIVE_CHUNK_SECONDS,
             model: MODEL
           });
@@ -292,7 +346,7 @@ server.on("connection", (socket) => {
       const frames = capture.length / CHANNELS;
       const prompt = typeof message.prompt === "string" && message.prompt.trim()
         ? message.prompt.trim()
-        : plantPrompt(lastLevel || rms(capture));
+        : plantPrompt(lastLevel || rms(capture), live.plant);
       const duration = Number.isFinite(Number(message.duration))
         ? Math.max(1, Math.min(MAX_DURATION, Number(message.duration)))
         : DEFAULT_DURATION;

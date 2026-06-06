@@ -28,6 +28,19 @@ type MidiVoice = {
   filter: BiquadFilterNode;
 };
 
+type PlantPattern = {
+  startedAt: number;
+  lastEventAt: number;
+  messageCount: number;
+  changeCount: number;
+  deltaSum: number;
+  deltaMax: number;
+  amountSum: number;
+  amountMax: number;
+  intervalSum: number;
+  intervalCount: number;
+};
+
 function db(level: number) {
   return `${Math.max(-60, Math.round(20 * Math.log10(Math.max(level, 0.0001))))} dB`;
 }
@@ -39,6 +52,21 @@ function midiFrequency(note: number) {
 const PLANT_CHANGE_THRESHOLD = 0.0015;
 const PLANT_CHANGE_GAIN = 46;
 const PLANT_OUTPUT_BOOST = 1.65;
+
+function emptyPlantPattern(): PlantPattern {
+  return {
+    startedAt: 0,
+    lastEventAt: 0,
+    messageCount: 0,
+    changeCount: 0,
+    deltaSum: 0,
+    deltaMax: 0,
+    amountSum: 0,
+    amountMax: 0,
+    intervalSum: 0,
+    intervalCount: 0
+  };
+}
 
 function errorMessage(error: unknown) {
   if (error instanceof Error) return `${error.name}: ${error.message}`;
@@ -93,6 +121,8 @@ function App() {
   const midiCalibrationTimerRef = useRef<number | null>(null);
   const midiBaselineRef = useRef<Map<string, number>>(new Map());
   const midiCalibratingUntilRef = useRef(0);
+  const plantPatternRef = useRef<PlantPattern>(emptyPlantPattern());
+  const lastPatternSentAtRef = useRef(0);
 
   const [armed, setArmed] = useState(false);
   const [live, setLive] = useState(false);
@@ -291,6 +321,66 @@ function App() {
     return `${command}:${data1}`;
   }
 
+  function resetPlantPattern() {
+    plantPatternRef.current = emptyPlantPattern();
+    lastPatternSentAtRef.current = 0;
+  }
+
+  function recordPlantPattern(delta: number, amount: number, hasPlantChange: boolean) {
+    const now = performance.now();
+    const pattern = plantPatternRef.current;
+    if (pattern.startedAt === 0) pattern.startedAt = now;
+    pattern.messageCount += 1;
+    if (pattern.lastEventAt > 0) {
+      pattern.intervalSum += now - pattern.lastEventAt;
+      pattern.intervalCount += 1;
+    }
+    pattern.lastEventAt = now;
+
+    if (!hasPlantChange) return;
+    pattern.changeCount += 1;
+    pattern.deltaSum += delta;
+    pattern.deltaMax = Math.max(pattern.deltaMax, delta);
+    pattern.amountSum += amount;
+    pattern.amountMax = Math.max(pattern.amountMax, amount);
+  }
+
+  function plantPatternSnapshot() {
+    const pattern = plantPatternRef.current;
+    const elapsedSeconds = pattern.startedAt > 0
+      ? Math.max(0.1, (performance.now() - pattern.startedAt) / 1000)
+      : 0.1;
+    const changeRateHz = pattern.changeCount / elapsedSeconds;
+    const averageDelta = pattern.changeCount > 0 ? pattern.deltaSum / pattern.changeCount : 0;
+    const averageAmount = pattern.changeCount > 0 ? pattern.amountSum / pattern.changeCount : 0;
+    const averageIntervalMs = pattern.intervalCount > 0 ? pattern.intervalSum / pattern.intervalCount : 0;
+    const density = changeRateHz > 2.2 ? "active" : changeRateHz > 0.7 ? "moderate" : "sparse";
+
+    return {
+      messageCount: pattern.messageCount,
+      changeCount: pattern.changeCount,
+      changeRateHz,
+      density,
+      averageDelta,
+      maxDelta: pattern.deltaMax,
+      averageAmount,
+      maxAmount: pattern.amountMax,
+      averageIntervalMs
+    };
+  }
+
+  function sendPlantPatternUpdate(force = false) {
+    const socket = socketRef.current;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    const now = performance.now();
+    if (!force && now - lastPatternSentAtRef.current < 600) return;
+    lastPatternSentAtRef.current = now;
+    socket.send(JSON.stringify({
+      type: "plant:pattern",
+      plant: plantPatternSnapshot()
+    }));
+  }
+
   async function ensureMidiAccess() {
     if (midiAccessRef.current) return midiAccessRef.current;
     const midiNavigator = navigator as NavigatorWithMidi;
@@ -344,6 +434,7 @@ function App() {
     setMidiInputState("listening");
     midiBaselineRef.current.clear();
     midiCalibratingUntilRef.current = 0;
+    resetPlantPattern();
     captureEnabledRef.current = true;
     if (!quiet) setStatus(`TouchMe MIDI connected: ${midiInputNames(touchMeInputs)}.`);
     return true;
@@ -367,6 +458,7 @@ function App() {
     setMidiInputState("idle");
     midiBaselineRef.current.clear();
     midiCalibratingUntilRef.current = 0;
+    resetPlantPattern();
     captureEnabledRef.current = false;
     midiVoicesRef.current.forEach(({ oscillator, gain }) => {
       const context = audioRef.current;
@@ -421,9 +513,11 @@ function App() {
     const amplifiedChange = Math.min(1, Math.pow(Math.max(0, baselineDelta - PLANT_CHANGE_THRESHOLD / 2) * PLANT_CHANGE_GAIN, 0.72));
     const changedAmount = Math.max(amplifiedChange, isNoteOn ? amount : 0);
     const hasPlantChange = isNoteOn || baselineDelta > PLANT_CHANGE_THRESHOLD;
+    recordPlantPattern(baselineDelta, changedAmount, hasPlantChange);
     setMidiBaselineDelta(baselineDelta);
     setMidiPlantAmount(changedAmount);
     setMidiInputState(hasPlantChange ? "plant change" : "baseline");
+    if (hasPlantChange) sendPlantPatternUpdate();
     if (hasPlantChange && armedRef.current && now - lastMidiStatusAtRef.current > 250) {
       setStatus(`TouchMe plant change: ${messageText}.`);
       lastMidiStatusAtRef.current = now;
@@ -640,7 +734,11 @@ function App() {
       setArmed(false);
       armedRef.current = false;
       setStatus("Starting live Magenta stream.");
-      socket.send(JSON.stringify({ type: "magenta:stream:start" }));
+      socket.send(JSON.stringify({
+        type: "magenta:stream:start",
+        plant: plantPatternSnapshot()
+      }));
+      sendPlantPatternUpdate(true);
     } catch {
       liveRef.current = false;
       setLive(false);
@@ -656,6 +754,7 @@ function App() {
       armedRef.current = true;
       setArmed(true);
       midiBaselineRef.current.clear();
+      resetPlantPattern();
       midiCalibratingUntilRef.current = performance.now() + 900;
       setStatus(`Calibrating TouchMe baseline from ${midiInputNames() || "MIDI input"}. Keep hands still.`);
       clearCalibrationTimer();
@@ -717,6 +816,7 @@ function App() {
     setMidiInputState("idle");
     midiBaselineRef.current.clear();
     midiCalibratingUntilRef.current = 0;
+    resetPlantPattern();
     setStatus(wasLive ? "Stopping live stream." : wasArmed ? "Waiting cancelled. Press Play to listen again." : "Stopped. Press Play to listen again.");
   }
 
