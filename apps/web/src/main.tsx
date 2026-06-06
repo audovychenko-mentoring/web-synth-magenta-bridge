@@ -49,6 +49,7 @@ function App() {
   });
   const [level, setLevel] = useState(0);
   const [capturedFrames, setCapturedFrames] = useState(0);
+  const [duration, setDuration] = useState(8);
   const [status, setStatus] = useState("Start audio, connect the bridge, then generate with Magenta.");
 
   const activeCount = useMemo(
@@ -191,7 +192,7 @@ function App() {
 
   async function continueWithMagenta() {
     await ensureAudio();
-    socketRef.current?.send(JSON.stringify({ type: "magenta:generate", duration: 4 }));
+    socketRef.current?.send(JSON.stringify({ type: "magenta:generate", duration }));
   }
 
   return (
@@ -222,6 +223,18 @@ function App() {
         <button className={capturing ? "active" : ""} onClick={toggleCapture}>
           {capturing ? <Square size={18} /> : <Circle size={18} />} Meter
         </button>
+        <div className="durationControl" aria-label="Generated audio length">
+          {[4, 8, 12, 20].map((seconds) => (
+            <button
+              key={seconds}
+              className={duration === seconds ? "active" : ""}
+              onClick={() => setDuration(seconds)}
+              type="button"
+            >
+              {seconds}s
+            </button>
+          ))}
+        </div>
         <button onClick={continueWithMagenta} disabled={!connected}>
           <Sparkles size={18} /> Generate
         </button>

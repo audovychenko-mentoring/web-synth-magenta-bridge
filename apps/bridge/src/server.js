@@ -12,12 +12,15 @@ const MODEL = process.env.MAGENTA_MODEL || "mrt2_base";
 const DEFAULT_PROMPT =
   process.env.MAGENTA_PROMPT || "ambient plant music with soft evolving synths";
 const DEFAULT_DURATION = Number(process.env.MAGENTA_DURATION || 4);
+const MAX_DURATION = Number(process.env.MAGENTA_MAX_DURATION || 20);
+const MAGENTA_FRAME_RATE = 25;
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "../../..");
 const pythonBin = resolve(repoRoot, ".venv/bin/python");
-const generatorScript = resolve(__dirname, "../scripts/generate_magenta.py");
+const streamScript = resolve(__dirname, "../scripts/stream_magenta.py");
 
 const server = new WebSocketServer({ port: PORT });
+let worker = null;
 
 function rms(float32) {
   if (!float32.length) return 0;
@@ -42,54 +45,115 @@ function plantPrompt(level) {
   return DEFAULT_PROMPT;
 }
 
-function generateMagenta({ prompt, duration }) {
+function workerLogs() {
+  return worker?.logs.slice(-40).join("\n") || "";
+}
+
+function rejectWorkerRequest(error) {
+  if (!worker?.active) return;
+  const active = worker.active;
+  worker.active = null;
+  active.reject(error);
+}
+
+function finishWorkerRequest() {
+  if (!worker?.active) return;
+  const active = worker.active;
+  worker.active = null;
+  active.resolve({ logs: workerLogs() });
+}
+
+function parseWorkerStdout(chunk) {
+  if (!worker) return;
+  worker.output = Buffer.concat([worker.output, chunk]);
+
+  while (worker.output.length >= 4) {
+    const byteLength = worker.output.readUInt32LE(0);
+    if (worker.output.length < 4 + byteLength) return;
+
+    const payload = worker.output.subarray(4, 4 + byteLength);
+    worker.output = worker.output.subarray(4 + byteLength);
+
+    if (byteLength === 0) {
+      finishWorkerRequest();
+      continue;
+    }
+
+    const active = worker.active;
+    if (active?.socket.readyState === active.socket.OPEN) {
+      active.socket.send(payload);
+    }
+  }
+}
+
+function ensureWorker() {
+  if (worker?.child.exitCode === null) return worker;
+
+  if (!existsSync(pythonBin)) {
+    throw new Error(`Python virtualenv not found at ${pythonBin}`);
+  }
+  if (!existsSync(streamScript)) {
+    throw new Error(`Streaming worker not found at ${streamScript}`);
+  }
+
+  const child = spawn(
+    pythonBin,
+    [
+      streamScript,
+      "--model",
+      MODEL
+    ],
+    {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        PYTHONUNBUFFERED: "1"
+      },
+      stdio: ["pipe", "pipe", "pipe"]
+    }
+  );
+
+  worker = {
+    child,
+    output: Buffer.alloc(0),
+    logs: [],
+    active: null
+  };
+
+  child.stdout.on("data", parseWorkerStdout);
+  child.stderr.on("data", (chunk) => {
+    const text = chunk.toString("utf8");
+    worker?.logs.push(...text.split(/\r?\n/).filter(Boolean));
+    if (worker && worker.logs.length > 200) worker.logs = worker.logs.slice(-200);
+  });
+  child.on("error", (error) => rejectWorkerRequest(error));
+  child.on("close", (code) => {
+    rejectWorkerRequest(new Error(`Magenta stream worker exited with ${code}`));
+    worker = null;
+  });
+
+  return worker;
+}
+
+function streamMagenta(socket, { prompt, duration }) {
   return new Promise((resolvePromise, reject) => {
-    if (!existsSync(pythonBin)) {
-      reject(new Error(`Python virtualenv not found at ${pythonBin}`));
-      return;
-    }
-    if (!existsSync(generatorScript)) {
-      reject(new Error(`Generator script not found at ${generatorScript}`));
+    const activeWorker = ensureWorker();
+    if (activeWorker.active) {
+      reject(new Error("Magenta stream worker is already generating"));
       return;
     }
 
-    const child = spawn(
-      pythonBin,
-      [
-        generatorScript,
-        "--model",
-        MODEL,
-        "--prompt",
-        prompt,
-        "--duration",
-        String(duration)
-      ],
-      {
-        cwd: repoRoot,
-        env: {
-          ...process.env,
-          PYTHONUNBUFFERED: "1"
-        },
-        stdio: ["ignore", "pipe", "pipe"]
-      }
-    );
+    activeWorker.active = {
+      socket,
+      resolve: resolvePromise,
+      reject
+    };
 
-    const stdout = [];
-    const stderr = [];
-    child.stdout.on("data", (chunk) => stdout.push(chunk));
-    child.stderr.on("data", (chunk) => stderr.push(chunk));
-    child.on("error", reject);
-    child.on("close", (code) => {
-      const logs = Buffer.concat(stderr).toString("utf8").trim();
-      if (code !== 0) {
-        reject(new Error(logs || `Magenta generator exited with ${code}`));
-        return;
-      }
-      resolvePromise({
-        audio: Buffer.concat(stdout),
-        logs
-      });
-    });
+    activeWorker.child.stdin.write(`${JSON.stringify({
+      type: "generate",
+      prompt,
+      frames: Math.max(1, Math.round(duration * MAGENTA_FRAME_RATE))
+    })}\n`);
   });
 }
 
@@ -157,7 +221,7 @@ server.on("connection", (socket) => {
         ? message.prompt.trim()
         : plantPrompt(lastLevel || rms(capture));
       const duration = Number.isFinite(Number(message.duration))
-        ? Math.max(1, Math.min(12, Number(message.duration)))
+        ? Math.max(1, Math.min(MAX_DURATION, Number(message.duration)))
         : DEFAULT_DURATION;
 
       sendJson(socket, {
@@ -172,8 +236,7 @@ server.on("connection", (socket) => {
 
       isGenerating = true;
       try {
-        const generated = await generateMagenta({ prompt, duration });
-        const audioFrames = generated.audio.byteLength / Float32Array.BYTES_PER_ELEMENT / CHANNELS;
+        const audioFrames = Math.round(duration * SAMPLE_RATE);
         sendJson(socket, {
           type: "magenta:audio:start",
           frames: audioFrames,
@@ -182,7 +245,7 @@ server.on("connection", (socket) => {
           mode: "magenta",
           model: MODEL
         });
-        socket.send(generated.audio);
+        const generated = await streamMagenta(socket, { prompt, duration });
         sendJson(socket, {
           type: "magenta:audio:end",
           logs: generated.logs

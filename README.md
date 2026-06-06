@@ -5,7 +5,7 @@ A browser-based synth collection connected to Magenta RealTime 2 through a local
 This repo currently has a working browser-to-bridge-to-Magenta path:
 
 - `apps/web`: Vite + React Web Audio synth collection.
-- `apps/bridge`: local WebSocket bridge that calls the installed Python/MLX Magenta RT package and streams stereo Float32 PCM back to the browser.
+- `apps/bridge`: local WebSocket bridge that keeps a Python/MLX Magenta RT worker alive and streams stereo Float32 PCM frames back to the browser.
 - `native/magenta`: notes for the lower-latency C++ `RealtimeRunner` integration.
 
 ## Run
@@ -16,6 +16,15 @@ npm run dev
 ```
 
 Open the web app at `http://localhost:5173` and keep the bridge running at `ws://localhost:8787`.
+
+In the browser:
+
+1. Click `Start Audio`.
+2. Click `Connect`.
+3. Choose `4s`, `8s`, `12s`, or `20s`.
+4. Click `Generate`.
+
+The first generation loads and warms up the model, so it can take a few seconds. After that, the worker stays alive and streams 40 ms Magenta frames to the browser as they are generated.
 
 ## Magenta Setup
 
@@ -37,7 +46,7 @@ MAGENTA_MODEL=mrt2_small npm run dev
 
 ## Integration Plan
 
-The current bridge launches a short-lived Python generator per request. That gives us real Magenta audio immediately, but the next production step is a persistent native bridge using `magentart::core::RealtimeRunner`:
+The current bridge uses a persistent Python/MLX worker. That gives us real incremental Magenta audio without reloading the model on every request. The next production step is a native bridge using `magentart::core::RealtimeRunner` for lower latency and stronger realtime behavior:
 
 - plant/Web Synth events map to live note and parameter controls.
 - `RealtimeRunner::read_audio_stereo(...)` streams generated audio back to the browser.

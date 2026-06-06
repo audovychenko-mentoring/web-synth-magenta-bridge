@@ -17,7 +17,7 @@ The browser bridge contract is already established by `apps/bridge`:
 - input: 48 kHz stereo Float32 PCM, interleaved `[L, R, L, R, ...]`
 - output: 48 kHz stereo Float32 PCM, interleaved
 
-The current bridge uses the Python/MLX package as an interim real-audio path. The native replacement should:
+The current bridge uses a persistent Python/MLX worker as an interim real-audio streaming path. The native replacement should:
 
 1. Load resources from `~/Documents/Magenta/magenta-rt-v2/resources`.
 2. Load `mrt2_small` by default, with `mrt2_base` as an option.

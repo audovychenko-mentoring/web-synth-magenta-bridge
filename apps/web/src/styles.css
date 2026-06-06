@@ -101,6 +101,35 @@ p {
   background: transparent;
 }
 
+.durationControl {
+  border: 1px solid #1d1d1d;
+  border-radius: 8px;
+  background: #fffaf2;
+  display: inline-grid;
+  grid-template-columns: repeat(4, minmax(46px, 1fr));
+  min-height: 44px;
+  overflow: hidden;
+  box-shadow: 0 2px 0 #1d1d1d;
+}
+
+.durationControl button {
+  border: 0;
+  border-right: 1px solid #1d1d1d;
+  border-radius: 0;
+  min-height: 42px;
+  box-shadow: none;
+  background: transparent;
+  padding: 0 10px;
+}
+
+.durationControl button:last-child {
+  border-right: 0;
+}
+
+.durationControl button.active {
+  background: #d7f4ff;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;
@@ -207,4 +236,3 @@ p {
     grid-template-columns: 1fr;
   }
 }
-
