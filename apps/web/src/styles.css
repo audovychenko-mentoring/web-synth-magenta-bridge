@@ -152,6 +152,15 @@ p {
   text-decoration-thickness: 2px;
 }
 
+.sunoPlayerRow {
+  display: block !important;
+}
+
+.sunoPlayer {
+  width: 100%;
+  min-height: 42px;
+}
+
 .meter {
   height: 18px;
   border: 1px solid #1d1d1d;
