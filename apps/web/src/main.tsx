@@ -75,6 +75,8 @@ function App() {
   const midiAccessRef = useRef<MidiAccessLike | null>(null);
   const midiInputRef = useRef<MidiInputLike | null>(null);
   const midiVoicesRef = useRef<Map<number, MidiVoice>>(new Map());
+  const plantVoiceRef = useRef<MidiVoice | null>(null);
+  const lastMidiStatusAtRef = useRef(0);
 
   const [armed, setArmed] = useState(false);
   const [live, setLive] = useState(false);
@@ -150,6 +152,31 @@ function App() {
     return null;
   }
 
+  function midiMessageText(data: Uint8Array) {
+    const [statusByte, data1 = 0, data2 = 0] = data;
+    const command = statusByte & 0xf0;
+    if (command === 0x90 && data2 > 0) return `note ${data1}, velocity ${data2}`;
+    if (command === 0x80 || (command === 0x90 && data2 === 0)) return `note ${data1} released`;
+    if (command === 0xb0) return `control ${data1}, value ${data2}`;
+    if (command === 0xd0) return `pressure ${data1}`;
+    if (command === 0xa0) return `note pressure ${data1}, value ${data2}`;
+    if (command === 0xe0) return `pitch bend ${((data2 << 7) + data1) - 8192}`;
+    return `MIDI ${Array.from(data).join(", ")}`;
+  }
+
+  function midiSignalAmount(data: Uint8Array) {
+    const [statusByte, data1 = 0, data2 = 0] = data;
+    const command = statusByte & 0xf0;
+    if (statusByte >= 0xf8) return 0;
+    if (command === 0x90) return data2 / 127;
+    if (command === 0x80) return 0;
+    if (command === 0xb0) return data2 / 127;
+    if (command === 0xd0) return data1 / 127;
+    if (command === 0xa0) return data2 / 127;
+    if (command === 0xe0) return Math.abs(((data2 << 7) + data1) - 8192) / 8192;
+    return Math.max(data1, data2) / 127;
+  }
+
   async function ensureMidiAccess() {
     if (midiAccessRef.current) return midiAccessRef.current;
     const midiNavigator = navigator as NavigatorWithMidi;
@@ -208,6 +235,7 @@ function App() {
       oscillator.stop(context.currentTime + 0.08);
     });
     midiVoicesRef.current.clear();
+    stopPlantSignal();
     setStatus("TouchMe MIDI disconnected.");
   }
 
@@ -216,6 +244,13 @@ function App() {
     const command = statusByte & 0xf0;
     const note = data1;
     const velocity = data2 / 127;
+    const amount = midiSignalAmount(event.data);
+    const now = performance.now();
+
+    if (armedRef.current && now - lastMidiStatusAtRef.current > 250) {
+      setStatus(`TouchMe MIDI received: ${midiMessageText(event.data)}.`);
+      lastMidiStatusAtRef.current = now;
+    }
 
     if (command === 0x90 && data2 > 0) {
       startMidiVoice(note, velocity);
@@ -228,8 +263,63 @@ function App() {
     }
     if (command === 0xb0) {
       updateMidiControl(data1, velocity);
-      if (data2 > 0) void startStreamFromMidiSignal();
+      if (data2 > 0) {
+        drivePlantSignal(event.data, amount);
+        void startStreamFromMidiSignal();
+      } else {
+        releasePlantSignal();
+      }
+      return;
     }
+    if (amount > 0.01) {
+      drivePlantSignal(event.data, amount);
+      void startStreamFromMidiSignal();
+    } else {
+      releasePlantSignal();
+    }
+  }
+
+  function drivePlantSignal(data: Uint8Array, amount: number) {
+    const context = audioRef.current;
+    if (!context || !masterRef.current) return;
+    const [, data1 = 0, data2 = 0] = data;
+
+    if (!plantVoiceRef.current) {
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      const filter = context.createBiquadFilter();
+      oscillator.type = "sawtooth";
+      oscillator.frequency.value = 160;
+      filter.type = "lowpass";
+      filter.frequency.value = 1200;
+      filter.Q.value = 0.9;
+      gain.gain.value = 0;
+      oscillator.connect(filter).connect(gain).connect(masterRef.current);
+      oscillator.start();
+      plantVoiceRef.current = { oscillator, gain, filter };
+    }
+
+    const voice = plantVoiceRef.current;
+    const control = Math.max(data1, data2) / 127;
+    voice.oscillator.frequency.setTargetAtTime(90 + control * 540 + amount * 260, context.currentTime, 0.04);
+    voice.filter.frequency.setTargetAtTime(420 + amount * 3200, context.currentTime, 0.04);
+    voice.gain.gain.setTargetAtTime(0.035 + amount * 0.16, context.currentTime, 0.025);
+  }
+
+  function releasePlantSignal() {
+    const context = audioRef.current;
+    const voice = plantVoiceRef.current;
+    if (!context || !voice) return;
+    voice.gain.gain.setTargetAtTime(0, context.currentTime, 0.04);
+  }
+
+  function stopPlantSignal() {
+    const context = audioRef.current;
+    const voice = plantVoiceRef.current;
+    if (!context || !voice) return;
+    voice.gain.gain.setTargetAtTime(0, context.currentTime, 0.02);
+    voice.oscillator.stop(context.currentTime + 0.08);
+    plantVoiceRef.current = null;
   }
 
   function startMidiVoice(note: number, velocity: number) {
@@ -361,7 +451,7 @@ function App() {
       if (!inputReady) return;
       armedRef.current = true;
       setArmed(true);
-      setStatus("Waiting for TouchMe MIDI signal.");
+      setStatus(`Waiting for TouchMe MIDI signal from ${midiInputRef.current?.name || "MIDI input"}.`);
     } catch (error) {
       armedRef.current = false;
       setArmed(false);
@@ -388,6 +478,7 @@ function App() {
       oscillator.stop(context.currentTime + 0.08);
     });
     midiVoicesRef.current.clear();
+    stopPlantSignal();
     playerRef.current?.port.postMessage({ type: "reset" });
     if (socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify({ type: "magenta:stream:stop" }));
