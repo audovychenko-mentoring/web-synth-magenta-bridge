@@ -33,7 +33,7 @@ The performance UI is intentionally minimal: play, stop, status text, and the in
 
 If Play reports that MIDI permission is blocked, open the browser site settings for `localhost:5173`, allow MIDI devices, reload the app, and press Play again. If the setting already says allowed but the app still reports blocked, reload this exact tab or open the app in the same Chrome profile where MIDI is allowed.
 
-If the app says it is waiting for TouchMe MIDI signal, it has opened the MIDI device but has not received plant data yet. Touch the plant/TouchMe input and watch the status text: it should change to `TouchMe MIDI received: ...`. If it stays waiting, the TouchMe board is connected but not sending MIDI into the browser.
+If the app says it is waiting for TouchMe MIDI signal, it has opened the MIDI device but has not received plant data yet. Touch the plant/TouchMe input and watch the status text: it should change to `TouchMe MIDI received: ...`. The app listens to every Playtron/TouchMe MIDI port it can see. If it stays waiting, the TouchMe board is connected but not sending MIDI into the browser.
 
 ## Magenta Setup
 

@@ -73,7 +73,7 @@ function App() {
   const socketRef = useRef<WebSocket | null>(null);
   const connectPromiseRef = useRef<Promise<WebSocket> | null>(null);
   const midiAccessRef = useRef<MidiAccessLike | null>(null);
-  const midiInputRef = useRef<MidiInputLike | null>(null);
+  const midiInputsRef = useRef<MidiInputLike[]>([]);
   const midiVoicesRef = useRef<Map<number, MidiVoice>>(new Map());
   const plantVoiceRef = useRef<MidiVoice | null>(null);
   const lastMidiStatusAtRef = useRef(0);
@@ -135,9 +135,9 @@ function App() {
   function syncMidiInputs(access = midiAccessRef.current) {
     if (!access) return;
     const inputs = Array.from(access.inputs.values());
-    if (midiInputRef.current && !inputs.some((input) => input.id === midiInputRef.current?.id)) {
-      midiInputRef.current = null;
-    }
+    midiInputsRef.current = midiInputsRef.current.filter((activeInput) =>
+      inputs.some((input) => input.id === activeInput.id)
+    );
   }
 
   function looksLikeTouchMe(input: MidiInputLike) {
@@ -145,11 +145,15 @@ function App() {
     return label.includes("touchme") || label.includes("playtronica");
   }
 
-  function pickTouchMeInput(inputs: MidiInputLike[]) {
-    const namedTouchMe = inputs.find(looksLikeTouchMe);
-    if (namedTouchMe) return namedTouchMe;
-    if (inputs.length === 1) return inputs[0];
-    return null;
+  function pickTouchMeInputs(inputs: MidiInputLike[]) {
+    const namedTouchMe = inputs.filter(looksLikeTouchMe);
+    if (namedTouchMe.length > 0) return namedTouchMe;
+    if (inputs.length === 1) return inputs;
+    return [];
+  }
+
+  function midiInputNames(inputs = midiInputsRef.current) {
+    return inputs.map((input) => input.name || input.manufacturer || "MIDI input").join(", ");
   }
 
   function midiMessageText(data: Uint8Array) {
@@ -201,8 +205,8 @@ function App() {
     if (!access) return false;
 
     const inputs = Array.from(access.inputs.values());
-    const input = pickTouchMeInput(inputs);
-    if (!input) {
+    const touchMeInputs = pickTouchMeInputs(inputs);
+    if (touchMeInputs.length === 0) {
       if (!quiet) {
         setStatus(inputs.length > 0
           ? "TouchMe was not detected. Disconnect other MIDI devices or reconnect the TouchMe board."
@@ -215,10 +219,12 @@ function App() {
       device.onmidimessage = null;
     });
     await ensureAudio();
-    input.onmidimessage = handleMidiMessage;
-    midiInputRef.current = input;
+    touchMeInputs.forEach((input) => {
+      input.onmidimessage = handleMidiMessage;
+    });
+    midiInputsRef.current = touchMeInputs;
     captureEnabledRef.current = true;
-    if (!quiet) setStatus(`TouchMe MIDI connected: ${input.name || "MIDI input"}.`);
+    if (!quiet) setStatus(`TouchMe MIDI connected: ${midiInputNames(touchMeInputs)}.`);
     return true;
   }
 
@@ -226,7 +232,7 @@ function App() {
     midiAccessRef.current?.inputs.forEach((input) => {
       input.onmidimessage = null;
     });
-    midiInputRef.current = null;
+    midiInputsRef.current = [];
     captureEnabledRef.current = false;
     midiVoicesRef.current.forEach(({ oscillator, gain }) => {
       const context = audioRef.current;
@@ -451,7 +457,7 @@ function App() {
       if (!inputReady) return;
       armedRef.current = true;
       setArmed(true);
-      setStatus(`Waiting for TouchMe MIDI signal from ${midiInputRef.current?.name || "MIDI input"}.`);
+      setStatus(`Waiting for TouchMe MIDI signal from ${midiInputNames() || "MIDI input"}.`);
     } catch (error) {
       armedRef.current = false;
       setArmed(false);
@@ -470,7 +476,7 @@ function App() {
     midiAccessRef.current?.inputs.forEach((input) => {
       input.onmidimessage = null;
     });
-    midiInputRef.current = null;
+    midiInputsRef.current = [];
     midiVoicesRef.current.forEach(({ oscillator, gain }) => {
       const context = audioRef.current;
       if (!context) return;
