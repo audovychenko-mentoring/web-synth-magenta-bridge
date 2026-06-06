@@ -41,10 +41,23 @@ function errorMessage(error: unknown) {
   return String(error);
 }
 
-function midiPermissionMessage(error: unknown) {
+async function midiPermissionState() {
+  try {
+    const permission = await navigator.permissions?.query({ name: "midi" as PermissionName });
+    return permission?.state || "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+function midiPermissionMessage(error: unknown, permissionState = "unknown") {
   const message = errorMessage(error);
   if (message.includes("NotAllowedError")) {
-    return "MIDI permission is blocked. Open site settings for localhost, allow MIDI devices, reload, then press Play.";
+    if (permissionState === "granted") {
+      return "MIDI is marked allowed, but the browser still denied access. Reload this exact tab; if it still fails, open this app in the same Chrome profile where MIDI is allowed.";
+    }
+    const stateNote = permissionState === "unknown" ? "" : ` Browser reports MIDI permission: ${permissionState}.`;
+    return `MIDI permission is blocked.${stateNote} Open site settings for localhost, allow MIDI devices, reload, then press Play.`;
   }
   if (message.includes("SecurityError")) {
     return "Web MIDI is blocked by the browser security settings. Open this app in Chrome or Edge on localhost.";
@@ -148,7 +161,7 @@ function App() {
     try {
       access = await midiNavigator.requestMIDIAccess() as MidiAccessLike;
     } catch (error) {
-      throw new Error(midiPermissionMessage(error));
+      throw new Error(midiPermissionMessage(error, await midiPermissionState()));
     }
     access.onstatechange = () => syncMidiInputs(access);
     midiAccessRef.current = access;
@@ -157,7 +170,6 @@ function App() {
   }
 
   async function connectTouchMeMidi(quiet = false) {
-    await ensureAudio();
     const access = await ensureMidiAccess();
     if (!access) return false;
 
@@ -175,6 +187,7 @@ function App() {
     inputs.forEach((device) => {
       device.onmidimessage = null;
     });
+    await ensureAudio();
     input.onmidimessage = handleMidiMessage;
     midiInputRef.current = input;
     captureEnabledRef.current = true;
@@ -344,7 +357,6 @@ function App() {
   async function startLiveStream() {
     if (armedRef.current || liveRef.current) return;
     try {
-      await ensureAudio();
       const inputReady = await connectTouchMeMidi();
       if (!inputReady) return;
       armedRef.current = true;

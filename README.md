@@ -31,7 +31,7 @@ The Play button opens the browser audio engine and connects directly to TouchMe 
 
 The performance UI is intentionally minimal: play, stop, status text, and the input meter.
 
-If Play reports that MIDI permission is blocked, open the browser site settings for `localhost:5173`, allow MIDI devices, reload the app, and press Play again.
+If Play reports that MIDI permission is blocked, open the browser site settings for `localhost:5173`, allow MIDI devices, reload the app, and press Play again. If the setting already says allowed but the app still reports blocked, reload this exact tab or open the app in the same Chrome profile where MIDI is allowed.
 
 ## Magenta Setup
 
