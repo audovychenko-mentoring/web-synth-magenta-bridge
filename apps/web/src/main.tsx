@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Play, Sparkles, Square } from "lucide-react";
+import { Play, Square } from "lucide-react";
 import "./styles.css";
 
 type MidiInputLike = {
@@ -40,8 +40,6 @@ type PlantPattern = {
   intervalSum: number;
   intervalCount: number;
 };
-
-type GenerationEngine = "magenta" | "suno";
 
 function db(level: number) {
   return `${Math.max(-60, Math.round(20 * Math.log10(Math.max(level, 0.0001))))} dB`;
@@ -91,7 +89,7 @@ function midiPermissionMessage(error: unknown, permissionState = "unknown") {
       return "MIDI is marked allowed, but the browser still denied access. Reload this exact tab; if it still fails, open this app in the same Chrome profile where MIDI is allowed.";
     }
     const stateNote = permissionState === "unknown" ? "" : ` Browser reports MIDI permission: ${permissionState}.`;
-    return `MIDI permission is blocked.${stateNote} Open site settings for localhost, allow MIDI devices, reload, then press Magenta or Suno.`;
+    return `MIDI permission is blocked.${stateNote} Open site settings for localhost, allow MIDI devices, reload, then press Magenta.`;
   }
   if (message.includes("SecurityError")) {
     return "Web MIDI is blocked by the browser security settings. Open this app in Chrome or Edge on localhost.";
@@ -125,17 +123,9 @@ function App() {
   const midiCalibratingUntilRef = useRef(0);
   const plantPatternRef = useRef<PlantPattern>(emptyPlantPattern());
   const lastPatternSentAtRef = useRef(0);
-  const targetEngineRef = useRef<GenerationEngine | null>(null);
-  const sunoGeneratingRef = useRef(false);
-  const sunoAudioRef = useRef<HTMLAudioElement | null>(null);
-  const sunoConfiguredRef = useRef<boolean | null>(null);
 
   const [armed, setArmed] = useState(false);
   const [live, setLive] = useState(false);
-  const [sunoGenerating, setSunoGenerating] = useState(false);
-  const [targetEngine, setTargetEngine] = useState<GenerationEngine | null>(null);
-  const [sunoAudioUrl, setSunoAudioUrl] = useState("");
-  const [sunoConfigured, setSunoConfigured] = useState<boolean | null>(null);
   const [level, setLevel] = useState(0);
   const [capturedFrames, setCapturedFrames] = useState(0);
   const [midiPortNames, setMidiPortNames] = useState("none");
@@ -146,7 +136,7 @@ function App() {
   const [midiBaselineDelta, setMidiBaselineDelta] = useState(0);
   const [midiPlantAmount, setMidiPlantAmount] = useState(0);
   const [midiInputState, setMidiInputState] = useState("idle");
-  const [status, setStatus] = useState("Press Magenta or Suno to listen for TouchMe MIDI.");
+  const [status, setStatus] = useState("Press Magenta to listen for TouchMe MIDI.");
 
   useEffect(() => () => {
     if (spectrogramFrameRef.current !== null) {
@@ -391,53 +381,6 @@ function App() {
       type: "plant:pattern",
       plant: plantPatternSnapshot()
     }));
-  }
-
-  async function playSunoAudio(url: string) {
-    stopSunoAudio();
-    setSunoAudioUrl(url);
-    const audio = new Audio(url);
-    audio.preload = "auto";
-    audio.onplaying = () => setStatus("Playing Suno audio.");
-    audio.onended = () => {
-      if (sunoAudioRef.current === audio) {
-        sunoAudioRef.current = null;
-        setStatus("Suno playback complete.");
-      }
-    };
-    sunoAudioRef.current = audio;
-    try {
-      await audio.play();
-    } catch (error) {
-      setStatus(`Suno audio is ready. Press play in the Suno player below. ${errorMessage(error)}`);
-    }
-  }
-
-  function stopSunoAudio() {
-    if (sunoAudioRef.current) {
-      sunoAudioRef.current.pause();
-      sunoAudioRef.current = null;
-    }
-  }
-
-  function clearSunoAudio() {
-    stopSunoAudio();
-    setSunoAudioUrl("");
-  }
-
-  function waitForSunoConfiguredState(timeoutMs = 1200) {
-    if (sunoConfiguredRef.current !== null) return Promise.resolve(sunoConfiguredRef.current);
-    return new Promise<boolean | null>((resolve) => {
-      const startedAt = performance.now();
-      const poll = () => {
-        if (sunoConfiguredRef.current !== null || performance.now() - startedAt >= timeoutMs) {
-          resolve(sunoConfiguredRef.current);
-          return;
-        }
-        window.setTimeout(poll, 40);
-      };
-      poll();
-    });
   }
 
   async function ensureMidiAccess() {
@@ -744,10 +687,6 @@ function App() {
     socket.onclose = () => {
       liveRef.current = false;
       setLive(false);
-      sunoGeneratingRef.current = false;
-      setSunoGenerating(false);
-      targetEngineRef.current = null;
-      setTargetEngine(null);
       setStatus("Bridge disconnected.");
       connectPromiseRef.current = null;
     };
@@ -772,51 +711,12 @@ function App() {
         } else if (message.type === "magenta:live:stop") {
           liveRef.current = false;
           setLive(false);
-          if (targetEngineRef.current === "magenta") {
-            targetEngineRef.current = null;
-            setTargetEngine(null);
-          }
           setStatus("Live stream stopped.");
-        } else if (message.type === "suno:generate:start") {
-          sunoGeneratingRef.current = true;
-          setSunoGenerating(true);
-          setStatus(`Generating Suno instrumental: "${message.prompt}"`);
-        } else if (message.type === "suno:status") {
-          if (sunoGeneratingRef.current) {
-            setStatus(`Suno ${message.status}: "${message.prompt}"`);
-          }
-        } else if (message.type === "suno:audio:ready") {
-          if (sunoGeneratingRef.current && typeof message.audioUrl === "string") {
-            setStatus("Suno audio is ready. Starting playback.");
-            void playSunoAudio(message.audioUrl);
-          }
-        } else if (message.type === "suno:complete") {
-          const shouldReportSunoComplete = sunoGeneratingRef.current || targetEngineRef.current === "suno";
-          if (typeof message.audioUrl === "string" && message.audioUrl) {
-            setSunoAudioUrl(message.audioUrl);
-          }
-          sunoGeneratingRef.current = false;
-          setSunoGenerating(false);
-          if (targetEngineRef.current === "suno") {
-            targetEngineRef.current = null;
-            setTargetEngine(null);
-          }
-          if (shouldReportSunoComplete) {
-            setStatus(typeof message.audioUrl === "string" && message.audioUrl
-              ? "Suno generation complete. Playing audio."
-              : "Suno generation complete.");
-          }
         } else if (message.type === "bridge:ready") {
-          sunoConfiguredRef.current = Boolean(message.sunoConfigured);
-          setSunoConfigured(Boolean(message.sunoConfigured));
-          setStatus(`Bridge ready in ${message.mode} mode (${message.model}).${message.sunoConfigured ? " Suno is configured." : " Suno needs SUNO_API_KEY."}`);
+          setStatus(`Bridge ready in ${message.mode} mode (${message.model}).`);
         } else if (message.type === "error") {
           liveRef.current = false;
           setLive(false);
-          sunoGeneratingRef.current = false;
-          setSunoGenerating(false);
-          targetEngineRef.current = null;
-          setTargetEngine(null);
           setStatus(message.message);
         }
         return;
@@ -830,56 +730,32 @@ function App() {
   }
 
   async function startStreamFromMidiSignal() {
-    if (!armedRef.current || liveRef.current || sunoGeneratingRef.current) return;
-    const engine = targetEngineRef.current || "magenta";
+    if (!armedRef.current || liveRef.current) return;
     try {
       const socket = await connectBridge();
       setArmed(false);
       armedRef.current = false;
       const plant = plantPatternSnapshot();
-      if (engine === "suno") {
-        sunoGeneratingRef.current = true;
-        setSunoGenerating(true);
-        setStatus("Sending plant prompt to Suno.");
-        socket.send(JSON.stringify({
-          type: "suno:generate",
-          plant
-        }));
-      } else {
-        liveRef.current = true;
-        setLive(true);
-        setStatus("Starting live Magenta stream.");
-        socket.send(JSON.stringify({
-          type: "magenta:stream:start",
-          plant
-        }));
-      }
+      liveRef.current = true;
+      setLive(true);
+      setStatus("Starting live Magenta stream.");
+      socket.send(JSON.stringify({
+        type: "magenta:stream:start",
+        plant
+      }));
       sendPlantPatternUpdate(true);
     } catch {
       liveRef.current = false;
       setLive(false);
-      sunoGeneratingRef.current = false;
-      setSunoGenerating(false);
-      setStatus(`${engine === "suno" ? "Suno generation" : "Live stream"} could not start. Check that the bridge is running.`);
+      setStatus("Live stream could not start. Check that the bridge is running.");
     }
   }
 
-  async function startLiveStream(engine: GenerationEngine) {
-    if (armedRef.current || liveRef.current || sunoGeneratingRef.current) return;
+  async function startLiveStream() {
+    if (armedRef.current || liveRef.current) return;
     try {
-      clearSunoAudio();
-      const socket = await connectBridge();
-      const sunoReady = engine === "suno" ? await waitForSunoConfiguredState() : sunoConfiguredRef.current;
-      if (engine === "suno" && sunoReady !== true) {
-        setStatus("Suno is not configured. Restart the bridge with SUNO_API_KEY=sk_live_your_key npm run dev.");
-        return;
-      }
-      targetEngineRef.current = engine;
-      setTargetEngine(engine);
       const inputReady = await connectTouchMeMidi();
       if (!inputReady) {
-        targetEngineRef.current = null;
-        setTargetEngine(null);
         return;
       }
       armedRef.current = true;
@@ -887,11 +763,11 @@ function App() {
       midiBaselineRef.current.clear();
       resetPlantPattern();
       midiCalibratingUntilRef.current = performance.now() + 900;
-      setStatus(`Calibrating TouchMe baseline for ${engine === "suno" ? "Suno" : "Magenta"} from ${midiInputNames() || "MIDI input"}. Keep hands still.`);
+      setStatus(`Calibrating TouchMe baseline for Magenta from ${midiInputNames() || "MIDI input"}. Keep hands still.`);
       clearCalibrationTimer();
       midiCalibrationTimerRef.current = window.setTimeout(() => {
         if (!armedRef.current || liveRef.current) return;
-        setStatus(`Listening for plant changes for ${engine === "suno" ? "Suno" : "Magenta"} from ${midiInputNames() || "MIDI input"}.`);
+        setStatus(`Listening for plant changes for Magenta from ${midiInputNames() || "MIDI input"}.`);
       }, 950);
       clearNoSignalTimer();
       midiNoSignalTimerRef.current = window.setTimeout(() => {
@@ -900,14 +776,9 @@ function App() {
           ? `Listening on ${midiInputNames() || "MIDI input"}, but no MIDI messages received yet.`
           : `MIDI baseline is present. Touch or move the plant to create a change.`);
       }, 4500);
-      if (engine === "suno" && sunoConfiguredRef.current === null) {
-        socket.send(JSON.stringify({ type: "plant:pattern", plant: plantPatternSnapshot() }));
-      }
     } catch (error) {
       armedRef.current = false;
       setArmed(false);
-      targetEngineRef.current = null;
-      setTargetEngine(null);
       setStatus(`TouchMe MIDI was not opened: ${error instanceof Error ? error.message : errorMessage(error)}`);
     }
   }
@@ -921,12 +792,7 @@ function App() {
     setArmed(false);
     liveRef.current = false;
     setLive(false);
-    sunoGeneratingRef.current = false;
-    setSunoGenerating(false);
-    targetEngineRef.current = null;
-    setTargetEngine(null);
     captureEnabledRef.current = false;
-    clearSunoAudio();
     midiAccessRef.current?.inputs.forEach((input) => {
       input.onmidimessage = null;
     });
@@ -958,10 +824,10 @@ function App() {
     midiBaselineRef.current.clear();
     midiCalibratingUntilRef.current = 0;
     resetPlantPattern();
-    setStatus(wasLive ? "Stopping live stream." : wasArmed ? "Waiting cancelled. Press Magenta or Suno to listen again." : "Stopped. Press Magenta or Suno to listen again.");
+    setStatus(wasLive ? "Stopping live stream." : wasArmed ? "Waiting cancelled. Press Magenta to listen again." : "Stopped. Press Magenta to listen again.");
   }
 
-  const busy = armed || live || sunoGenerating;
+  const busy = armed || live;
 
   return (
     <main className="shell">
@@ -974,20 +840,12 @@ function App() {
 
       <section className="transport">
         <button
-          className={`primaryAction magentaAction ${targetEngine === "magenta" ? "active" : ""}`}
-          onClick={() => startLiveStream("magenta")}
+          className="primaryAction magentaAction"
+          onClick={startLiveStream}
           disabled={busy}
         >
           <Play size={18} fill="currentColor" />
           Magenta
-        </button>
-        <button
-          className={`primaryAction sunoAction ${targetEngine === "suno" ? "active" : ""}`}
-          onClick={() => startLiveStream("suno")}
-          disabled={busy}
-        >
-          <Sparkles size={18} />
-          Suno
         </button>
         <button className="primaryAction stopAction" onClick={stopLiveStream}>
           <Square size={18} />
@@ -1011,25 +869,6 @@ function App() {
           <div className="spectrogramPanel">
             <span className="label">Spectrogram</span>
             <canvas ref={spectrogramCanvasRef} className="spectrogramCanvas" aria-label="Input spectrogram" />
-          </div>
-          {sunoAudioUrl ? (
-            <>
-              <div>
-                <span className="label">Suno Track</span>
-                <a className="debugValue trackLink" href={sunoAudioUrl} target="_blank" rel="noreferrer">
-                  Open audio
-                </a>
-              </div>
-              <div className="sunoPlayerRow">
-                <audio className="sunoPlayer" src={sunoAudioUrl} controls autoPlay />
-              </div>
-            </>
-          ) : null}
-          <div>
-            <span className="label">Suno</span>
-            <strong className="debugValue">
-              {sunoConfigured === null ? "unknown" : sunoConfigured ? "configured" : "needs key"}
-            </strong>
           </div>
           <div>
             <span className="label">Ports</span>

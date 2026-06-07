@@ -86,10 +86,6 @@ p {
   background: #b9f2cc;
 }
 
-.sunoAction:not(:disabled) {
-  background: #d7f4ff;
-}
-
 .stopAction:not(:disabled) {
   background: #ffd1cc;
 }
@@ -144,21 +140,6 @@ p {
   overflow-wrap: anywhere;
   text-align: right;
   font-size: 0.95rem !important;
-}
-
-.trackLink {
-  color: #0f766e;
-  font-weight: 800;
-  text-decoration-thickness: 2px;
-}
-
-.sunoPlayerRow {
-  display: block !important;
-}
-
-.sunoPlayer {
-  width: 100%;
-  min-height: 42px;
 }
 
 .meter {
