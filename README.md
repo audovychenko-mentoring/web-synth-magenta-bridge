@@ -6,6 +6,7 @@ This repo currently has a working browser-to-bridge-to-Magenta path:
 
 - `apps/web`: Vite + React Web Audio synth collection.
 - `apps/bridge`: local WebSocket bridge that keeps a Python/MLX Magenta RT worker alive and streams stereo Float32 PCM frames back to the browser.
+- `apps/ableton-extension`: staging workspace for the Ableton Live Extension version.
 - `native/magenta`: notes for the lower-latency C++ `RealtimeRunner` integration.
 
 ## Run
@@ -64,6 +65,18 @@ By default, the bridge uses `mrt2_small` because it is the reliable realtime mod
 ```bash
 MAGENTA_MODEL=mrt2_base npm run dev
 ```
+
+## Ableton Extension Setup
+
+Ableton Extensions are currently available in Live 12 Suite Beta, version 12.4.5 or later, through Ableton's public beta program. The SDK is downloaded from Ableton Centercode, so the beta SDK archives are not committed to this repo.
+
+Check local readiness:
+
+```bash
+npm run ableton:check
+```
+
+When you have the SDK download, copy the `.tgz` files into `vendor/ableton-sdk/`. The Ableton extension staging workspace lives in `apps/ableton-extension/`.
 
 ## Integration Plan
 

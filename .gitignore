@@ -4,3 +4,5 @@ dist/
 *.log
 *.tsbuildinfo
 tmp/
+vendor/ableton-sdk/*.tgz
+vendor/ableton-sdk/*.tar.gz

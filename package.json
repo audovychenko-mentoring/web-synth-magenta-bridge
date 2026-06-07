@@ -5,15 +5,16 @@
   "type": "module",
   "workspaces": [
     "apps/web",
-    "apps/bridge"
+    "apps/bridge",
+    "apps/ableton-extension"
   ],
   "scripts": {
     "dev": "concurrently -n bridge,web -c cyan,magenta \"npm run dev -w apps/bridge\" \"npm run dev -w apps/web\"",
     "build": "npm run build -w apps/web",
-    "typecheck": "npm run typecheck -w apps/web"
+    "typecheck": "npm run typecheck -w apps/web",
+    "ableton:check": "npm run check -w apps/ableton-extension"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"
   }
 }
-
